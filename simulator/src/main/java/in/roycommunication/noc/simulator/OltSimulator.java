@@ -11,10 +11,10 @@ public final class OltSimulator {
     public record Event(String eventId, String ponPort, String onuId, EventType eventType,
                         Instant eventTimestamp, Instant receiveTimestamp) {}
 
-    private static final String PON_PORT = "PON-03";
-    private static final List<String> SPLITTER_S2 = List.of(
+    public static final String PON_PORT = "PON-03";
+    public static final List<String> S2_ONUS = List.of(
             "ONU-01", "ONU-02", "ONU-03", "ONU-04", "ONU-05", "ONU-06", "ONU-07", "ONU-08");
-    private static final List<String> SPLITTER_S3 = List.of(
+    public static final List<String> S3_ONUS = List.of(
             "ONU-09", "ONU-10", "ONU-11", "ONU-12", "ONU-13", "ONU-14", "ONU-15", "ONU-16");
 
     private final String scenarioId;
@@ -24,20 +24,20 @@ public final class OltSimulator {
     private OltSimulator(String scenarioId, Instant start) {
         this.scenarioId = scenarioId;
         this.start = start;
-        emit(SPLITTER_S2, EventType.ONU_ONLINE, 0, 0);
-        emit(SPLITTER_S3, EventType.ONU_ONLINE, 0, 0);
+        emit(S2_ONUS, EventType.ONU_ONLINE, 0, 0);
+        emit(S3_ONUS, EventType.ONU_ONLINE, 0, 0);
     }
 
     public static List<Event> branchLos() {
         var replay = new OltSimulator("branch-los", Instant.parse("2026-01-01T00:00:00Z"));
-        replay.emit(SPLITTER_S2, EventType.ONU_LOS, 30, 5);
-        replay.emit(SPLITTER_S2, EventType.ONU_ONLINE, 120, 1);
+        replay.emit(S2_ONUS, EventType.ONU_LOS, 30, 5);
+        replay.emit(S2_ONUS, EventType.ONU_ONLINE, 120, 1);
         return List.copyOf(replay.events);
     }
 
     public static List<Event> dyingGasp() {
         var replay = new OltSimulator("dying-gasp", Instant.parse("2026-01-01T01:00:00Z"));
-        replay.emit(List.of(SPLITTER_S3.getFirst()), EventType.ONU_DYING_GASP, 30, 0);
+        replay.emit(List.of(S3_ONUS.getFirst()), EventType.ONU_DYING_GASP, 30, 0);
         return List.copyOf(replay.events);
     }
 

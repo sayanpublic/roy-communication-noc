@@ -39,3 +39,11 @@ Splitter parent links and incoming fiber segments define the candidate scopes. E
 Inputs with exactly the same set of physically assigned ONUs form one fault domain. Its `candidateSegments` list contains the known segment IDs in upstream-to-downstream order. The deepest splitter ID remains the label for a proper subtree. A cascade through S2/F2 and S4/F4 can therefore report both F2 and F4 on one incident. The singular `inputSegment` is available only for a single identified splitter input. An unlabelled alternative leaves that field unknown. A PON-wide inference can include common feeder segments, while an observed port-down scope has an empty candidate list.
 
 Recovery requires fresh online observations for all implicated ONUs, continuous visibility, and a configurable hold of 30 seconds. An observed port-down incident also requires an explicit port-up observation. Stale readings and OLT visibility loss produce unknown state. A field diagnosis is required to identify a physical break.
+
+## ADR-008 — Local read-only replay API
+
+The `api` module packages Spring Boot with the simulator and correlation engine in one executable JAR. The HTTP listener binds to `127.0.0.1`. It serves synthetic data from memory on the local machine.
+
+At startup each named view feeds a fresh engine the simulator alarms received by its fixed UTC cutoff. The engine advances to that cutoff to evaluate recovery timers, and the API retains the resulting immutable view. A GET selects a view by name. Its `replayTimestamp` is the cutoff on the receive clock. Incident timeline entries use event time, including the deadline for stable recovery.
+
+The `observed` object contains PON and ONU readings and a journal of normalized alarms. Each incident change includes its basis, scope, affected and eligible ONUs and counts, and evidence IDs referencing that journal. Candidate segments are inferred from optical topology. ONU keys and membership lists are sorted for repeatable JSON. The cascade uses the same LOS alarms as S2 with F4 downstream of F2.

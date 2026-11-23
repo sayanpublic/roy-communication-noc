@@ -2,11 +2,11 @@
 
 ## Current status
 
-**Steps 1 and 2 complete.** The Java 21 simulator and correlation engine run offline. The engine exposes observed ONU and port state, inferred fault scopes, and event-time incident histories.
+The Java 21 simulator, correlation engine, and local read-only Spring Boot API run on synthetic data. The API exposes four fixed views of observed ONU and PON state and inferred incident history. See [startup and example requests](#2026-11-23--local-read-only-replay-api).
 
 ## Next milestone
 
-A read-only API for inspecting simulated devices and incidents is a proposed follow-up. Field integration depends on separate, authorized verification of the actual firmware and alarm semantics.
+Review the local API responses before selecting the next milestone. Field integration depends on separate, authorized verification of the actual firmware and alarm semantics.
 
 ## Acceptance criteria
 - The sixth S2 LOS opens one inferred incident at 6 of 8 eligible ONUs. It updates through 8 of 8 and resolves after stable recovery.
@@ -84,6 +84,38 @@ Follow-up to `f25f705` on `codex/dev-olt-simulator`. The new regression in `Corr
 | 5 | 1 | `PON-03/S2/1` | `PON-03/S2/2` |
 
 In the tie, the original ID stays reserved. Replaying every alarm in reverse delivery order preserved both incident histories and the observation journal in all three cases. From the repository root, `mvn test` and `mvn -o test` each passed **35 tests** with zero failures, errors, or skips (4 simulator and 31 correlation). The next milestone is the local read-only API for simulated data.
+
+### 2026-11-23 — Local read-only replay API
+
+Based on `6bb3d36` on `codex/dev-olt-simulator`. The root build includes the new `api` module. It uses Spring Boot 3.5.16, the simulator's branch inventory and event streams, and the existing correlation engine. Each response identifies its replay cutoff. Incident evidence IDs reference entries in `observed.alarms`, which carry both device and receive timestamps.
+
+From the repository root in PowerShell with JDK 21 and the Maven dependencies cached, build and start the API.
+
+```powershell
+mvn -o package
+java -jar api/target/api-0.1.0-SNAPSHOT.jar
+```
+
+In a second PowerShell terminal, list the views and request each one. Use Ctrl+C in the server terminal to stop it.
+
+```powershell
+curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays
+curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays/s2-open
+curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays/s2-resolved
+curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays/dying-gasp
+curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays/cascade-open
+```
+
+| View | Replay cutoff on 2026-01-01 (UTC) | What to inspect |
+| --- | --- | --- |
+| `s2-open` | 00:00:55.250 | S2 opens at 6 of 8 eligible ONUs. F2 is the sole candidate and S3 stays online. |
+| `s2-resolved` | 00:02:37 | The same incident reaches 8 of 8 at 00:01:05, enters recovery at 00:02:07, and resolves after the 30-second hold. |
+| `dying-gasp` | 01:00:30.250 | ONU-09 reports Dying Gasp. The other 15 ONUs are online and the incident list is empty. |
+| `cascade-open` | 00:00:55.250 | One inferred incident lists both F2 and F4 because they serve the same eight ONUs. |
+
+From the repository root, `mvn test` and `mvn -o package` each passed **41 tests** (4 simulator, 31 correlation and 6 HTTP integration) with zero failures, errors, or skips. The HTTP tests cover all four views, evidence references, interleaved GETs, a 404 for an unknown view, and 405 responses to POST, PUT, and DELETE. The root build pins Maven JAR Plugin 3.4.2, the version used by Spring Boot 3.5.16, for offline packaging.
+
+Two independent launches of the packaged JAR each bound to `127.0.0.1:8080`. The index listed the four documented views, and the JSON body for each view matched across both launches. The API serves these checkpoints from memory. The [decision log](DECISIONS.md#adr-008--local-read-only-replay-api) records how replay cutoffs and incident timestamps are selected.
 
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.
