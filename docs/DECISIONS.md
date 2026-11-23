@@ -26,7 +26,9 @@
 
 The replay clock follows receive time and can advance explicitly between alarms. Snapshots replay unique observations in deterministic event-time order, so an admissible late alarm can correct the history. Port and visibility signals are applied before ONU observations at the same instant. The default delivery allowance is 90 seconds. Future-dated and excessively delayed observations remain available in the journal and are excluded from state transitions. This in-memory design supports finite offline scenarios. Long-running collection will require a retention policy and bounded processing.
 
-An engine reserves a public incident ID when it first returns the incident in a snapshot. On later replays it matches the original opening alarms to their episodes before assigning numbers to newly discovered outages. Repeated LOS reports can trace back to an earlier onset of the same continuous loss. Timelines follow event time, and incident numbers follow first publication. An ID whose evidence disappears stays reserved. Keeping links stable across process restarts will require persisting these bindings with the journal.
+An engine reserves a public incident ID when it first returns the incident in a snapshot. On each replay, every original opening alarm counts once toward the outage it supports. A repeated LOS report counts toward the outage that owns the onset of that continuous loss. The outage with the unique highest count keeps the ID. If the highest counts tie or all opening alarms lose their match, the ID stays reserved and is absent from that snapshot. Later evidence can distinguish the outages.
+
+The engine considers existing IDs in first-publication order. If two IDs identify the same outage, the earlier ID takes precedence and the other stays reserved. The engine then allocates fresh numbers to outages still lacking an ID. Timelines follow event time, and incident numbers follow first publication. Keeping links stable across process restarts will require persisting these bindings with the journal.
 
 ## ADR-007 — Evidence for inferred scope and recovery
 

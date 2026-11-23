@@ -132,6 +132,24 @@ final class IncidentReplay {
                 incidents.stream().map(Tracked::snapshot).toList());
     }
 
+    private Tracked matchOpeningAlarms(List<String> openingAlarms) {
+        var counts = new HashMap<Tracked, Integer>();
+        Tracked bestMatch = null;
+        int highestCount = 0;
+        for (String eventId : openingAlarms) {
+            Tracked episode = ownerByAlarm.get(telemetry.causalAlarmId(eventId));
+            if (episode == null) continue;
+            int count = counts.merge(episode, 1, Integer::sum);
+            if (count > highestCount) {
+                highestCount = count;
+                bestMatch = episode;
+            } else if (count == highestCount) {
+                bestMatch = null;
+            }
+        }
+        return bestMatch;
+    }
+
     /** Lives with the engine, across projections. A public number belongs to its original alarm evidence. */
     static final class PublishedIds {
         private final Map<String, List<String>> openingEvidenceById = new LinkedHashMap<>();
@@ -140,13 +158,8 @@ final class IncidentReplay {
         private void assign(IncidentReplay replay) {
             // Reconnect existing links before allocating any numbers to newly discovered history.
             for (var binding : openingEvidenceById.entrySet()) {
-                for (String alarm : binding.getValue()) {
-                    Tracked owner = replay.ownerByAlarm.get(replay.telemetry.causalAlarmId(alarm));
-                    if (owner != null && owner.id == null) {
-                        owner.id = binding.getKey();
-                        break;
-                    }
-                }
+                Tracked owner = replay.matchOpeningAlarms(binding.getValue());
+                if (owner != null && owner.id == null) owner.id = binding.getKey();
             }
             for (Tracked incident : replay.incidents) {
                 if (incident.id != null) continue;

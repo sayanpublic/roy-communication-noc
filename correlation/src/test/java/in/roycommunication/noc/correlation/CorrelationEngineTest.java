@@ -2,6 +2,8 @@ package in.roycommunication.noc.correlation;
 
 import in.roycommunication.noc.simulator.OltSimulator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -274,6 +276,56 @@ class CorrelationEngineTest {
         Incident corrected = only(engine.snapshot().incidents());
         assertEquals(published.id(), corrected.id());
         assertEquals(START.plusSeconds(16), corrected.timeline().getFirst().at());
+    }
+
+    @ParameterizedTest(name = "{0} of the six published opening alarms belong to the earlier outage")
+    @CsvSource(textBlock = """
+            # Earlier alarms, resolved ID, active ID
+            1, PON-03/S2/2, PON-03/S2/1
+            3, PON-03/S2/2, PON-03/S2/3
+            5, PON-03/S2/1, PON-03/S2/2
+            """)
+    void aSplitOpeningKeepsThePublishedIdOnlyWithTheBestSupportedOutage(
+            int earlierAlarmCount, String resolvedId, String activeId) {
+        var engine = engine();
+        online(engine, 16, 0);
+        var original = new ArrayList<Alarm>();
+        var backfill = new ArrayList<Alarm>();
+        for (int i = 1; i <= 6; i++) {
+            Alarm earlyLoss = alarm(ONU_LOS, onu(i), 10 + i);
+            if (i <= earlierAlarmCount) {
+                original.add(earlyLoss);
+            } else {
+                original.add(alarm(ONU_LOS, onu(i), 70 + i));
+                backfill.add(earlyLoss);
+            }
+            backfill.add(alarm(ONU_ONLINE, onu(i), 20 + i));
+            // These onsets make the original reports at 70+i repeats of the second outage.
+            backfill.add(alarm(ONU_LOS, onu(i), 60 + i));
+        }
+        original.forEach(engine::accept);
+        Incident published = only(engine.snapshot().incidents());
+        assertEquals("PON-03/S2/1", published.id());
+        assertEquals(original.stream().map(Alarm::eventId).collect(Collectors.toSet()),
+                Set.copyOf(published.timeline().getFirst().evidenceIds()));
+
+        for (Alarm alarm : backfill) engine.accept(receivedAt(alarm, 80));
+        var corrected = engine.snapshot();
+        assertEquals(2, corrected.incidents().size());
+        Incident resolved = corrected.incidents().getFirst();
+        assertEquals(Status.RESOLVED, resolved.latest().status());
+        assertEquals(START.plusSeconds(16), resolved.timeline().getFirst().at());
+        assertEquals(START.plusSeconds(56), resolved.latest().at());
+        Incident active = corrected.incidents().getLast();
+        assertEquals(Status.OPEN, active.latest().status());
+        assertEquals(START.plusSeconds(66), active.timeline().getFirst().at());
+        assertEquals(activeId, active.id());
+        assertEquals(resolvedId, resolved.id());
+
+        for (Alarm alarm : corrected.observations().reversed()) engine.accept(receivedAt(alarm, 85));
+        var redelivered = engine.snapshot();
+        assertEquals(corrected.incidents(), redelivered.incidents());
+        assertEquals(corrected.observations(), redelivered.observations());
     }
 
     private static Alarm receivedAt(Alarm alarm, long second) {

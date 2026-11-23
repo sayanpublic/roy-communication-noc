@@ -73,5 +73,17 @@ Follow-up to the review of `80f8324` on `codex/dev-olt-simulator`. The two new r
 
 From the repository root, `mvn test` and `mvn -o test` each passed **32 tests** with zero failures, errors, or skips. Four cover the simulator and 28 cover correlation, topology, and replay. ID reservations live in the engine's memory. The [decision log](DECISIONS.md) records the scope and identity semantics for a future API.
 
+### 2026-11-23 — Incident identity when opening alarms split across outages
+
+Follow-up to `f25f705` on `codex/dev-olt-simulator`. The new regression in `CorrelationEngineTest` reproduced two cases where the first matching alarm incorrectly decided which S2 outage inherited `PON-03/S2/1`. `IncidentReplay` now counts all six original alarms in this fixture, including LOS reports that late observations trace to an earlier onset of the same loss.
+
+| Original alarms in resolved outage | Original alarms in active outage | Resolved incident | Active incident |
+| ---: | ---: | --- | --- |
+| 1 | 5 | `PON-03/S2/2` | `PON-03/S2/1` |
+| 3 | 3 | `PON-03/S2/2` | `PON-03/S2/3` |
+| 5 | 1 | `PON-03/S2/1` | `PON-03/S2/2` |
+
+In the tie, the original ID stays reserved. Replaying every alarm in reverse delivery order preserved both incident histories and the observation journal in all three cases. From the repository root, `mvn test` and `mvn -o test` each passed **35 tests** with zero failures, errors, or skips (4 simulator and 31 correlation). The next milestone is the local read-only API for simulated data.
+
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.
