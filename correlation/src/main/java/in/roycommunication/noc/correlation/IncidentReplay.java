@@ -22,17 +22,19 @@ final class IncidentReplay {
     private final List<Tracked> incidents = new ArrayList<>();
     private final Map<String, Tracked> ownerByAlarm = new HashMap<>();
 
-    IncidentReplay(FiberTopology topology, CorrelationPolicy policy) {
+    IncidentReplay(FiberTopology topology, CorrelationPolicy policy, List<Alarm> observations) {
         this.topology = topology;
         this.policy = policy;
-        this.telemetry = new PonTelemetry(topology, policy);
+        this.telemetry = new PonTelemetry(topology, policy, observations);
+        observations.forEach(this::apply);
     }
 
-    void apply(Alarm alarm) {
+    private void apply(Alarm alarm) {
         Instant at = alarm.eventTimestamp();
         // Alarms stamped at the recovery deadline participate in the stability decision.
         advanceTimers(at, false);
-        boolean newlyLost = telemetry.observe(alarm);
+        Alarm support = telemetry.evidenceFor(alarm);
+        boolean newlyLost = telemetry.observe(alarm, support);
         var evidence = new HashMap<Tracked, List<String>>();
         if (alarm.type() == Alarm.Type.PON_PORT_DOWN && telemetry.portDown()) {
             var candidate = telemetry.portEvidence(at);
@@ -49,12 +51,12 @@ final class IncidentReplay {
         }
         for (Tracked incident : incidents) {
             if (!incident.active()) continue;
-            if (newlyLost) incident.addLoss(alarm);
+            if (newlyLost) incident.addLoss(support);
             boolean recovered = incident.recovered(at);
             if (!recovered) incident.recoveringSince = null;
             else if (incident.recoveringSince == null) incident.recoveringSince = at;
             incident.record(at, recovered ? Status.RECOVERING : Status.OPEN,
-                    evidence.getOrDefault(incident, List.of(alarm.eventId())));
+                    evidence.getOrDefault(incident, List.of(support.eventId())));
         }
     }
 
@@ -220,7 +222,7 @@ final class IncidentReplay {
             var scope = basis == Basis.OBSERVED_PORT_DOWN ? topology.observedPort() : domain.scope();
             Set<String> affected = new LinkedHashSet<>();
             for (String onu : impacted) {
-                if (telemetry.state(onu, at) == OnuState.LOS) affected.add(onu);
+                if (telemetry.hasFreshLos(onu, at)) affected.add(onu);
             }
             if (!timeline.isEmpty()) {
                 var previous = timeline.getLast();

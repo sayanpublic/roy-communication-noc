@@ -4,6 +4,7 @@ import in.roycommunication.noc.simulator.OltSimulator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,6 +29,57 @@ class CorrelationEngineTest {
         for (int second = 1; second <= 8; second++) report(engine, ONU_LOS, 1, second);
         assertEquals(OnuState.LOS, engine.snapshot().onus().get(onu(1)).state());
         assertTrue(engine.snapshot().incidents().isEmpty());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Alarm.Type.class, names = {"ONU_ONLINE", "ONU_DYING_GASP", "OLT_UNREACHABLE"})
+    void aLaterLosCannotConfirmAnUnknownReadingAcrossAnInterruption(Alarm.Type interruption) {
+        var engine = new CorrelationEngine(tree(4, 4), CorrelationPolicy.defaults());
+        online(engine, 8, 0);
+        report(engine, ONU_OFFLINE_UNKNOWN, 1, 5);
+        report(engine, ONU_LOS, 2, 6);
+        report(engine, ONU_LOS, 3, 7);
+        if (interruption == OLT_UNREACHABLE) {
+            engine.accept(alarm(OLT_UNREACHABLE, null, 8));
+            engine.accept(alarm(OLT_REACHABLE, null, 9));
+        } else {
+            report(engine, interruption, 1, 8);
+        }
+        report(engine, ONU_LOS, 1, 100);
+        var snapshot = engine.snapshot();
+        assertEquals(OnuState.LOS, snapshot.onus().get(onu(1)).state());
+        assertTrue(snapshot.incidents().isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"17, 1", "18, 0"})
+    void confirmingAnUnknownReadingRequiresContinuousFreshTelemetry(int confirmedAt, int expectedIncidents) {
+        var policy = new CorrelationPolicy(Duration.ofSeconds(90), 3, 75, Duration.ofSeconds(10),
+                Duration.ofSeconds(30), Duration.ofSeconds(90));
+        var engine = new CorrelationEngine(tree(4, 4), policy);
+        online(engine, 8, 0);
+        report(engine, ONU_OFFLINE_UNKNOWN, 1, 7);
+        report(engine, ONU_LOS, 2, 8);
+        report(engine, ONU_LOS, 3, 8);
+        report(engine, ONU_LOS, 1, confirmedAt);
+        assertEquals(expectedIncidents, engine.snapshot().incidents().size());
+        assertEquals(OnuState.LOS, engine.snapshot().onus().get(onu(1)).state());
+    }
+
+    @Test
+    void onlyAnAdmissibleConfirmationCanSupportTheEarlierOutage() {
+        var engine = new CorrelationEngine(tree(4, 4), CorrelationPolicy.defaults());
+        online(engine, 8, 0);
+        report(engine, ONU_OFFLINE_UNKNOWN, 1, 10);
+        report(engine, ONU_LOS, 2, 11);
+        report(engine, ONU_LOS, 3, 12);
+        var confirmation = alarm(ONU_LOS, onu(1), 20);
+        engine.accept(receivedAt(confirmation, 111));
+        assertTrue(engine.snapshot().incidents().isEmpty());
+        assertEquals(OnuState.OFFLINE_UNKNOWN, engine.snapshot().onus().get(onu(1)).state());
+
+        engine.accept(receivedAt(confirmation, 110)); // A copy delivered at the inclusive 90-second limit.
+        assertEquals(START.plusSeconds(12), only(active(engine)).latest().at());
     }
 
     @Test

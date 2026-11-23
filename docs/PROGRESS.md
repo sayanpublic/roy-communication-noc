@@ -129,5 +129,20 @@ The fixtures include the related manual's `ONU Link LOST` and `Dying Gasp` label
 
 From the repository root, `mvn -o -pl syrotech-adapter -am test` passed **55 tests** with cached dependencies. The full `mvn test` run passed **61 tests** (20 adapter, 31 correlation, 4 simulator and 6 local HTTP) with zero failures, errors, or skips.
 
+### 2026-11-24 — LOS confirmed by a later poll
+
+On `codex/dev-olt-simulator` at `fab19a1`, the new adapter-to-engine test reproduced the missed incident. Three S2 ONUs reported LOS on a later poll and the engine opened zero incidents. Changes to `CorrelationEngine`, `IncidentReplay`, and `PonTelemetry` let a fresh LOS confirmation support the original offline interval. [Correlation timing and evidence](DECISIONS.md#adr-007--evidence-for-inferred-scope-and-recovery)
+
+| Replay seconds | Observations and incident history |
+| --- | --- |
+| 10, 11, 12 | Three of four eligible S2 ONUs go offline with unknown cause. Their second poll at 15 also reports unknown. |
+| 20–23 | Two ONUs confirm LOS at seconds 20 and 22. The first ONU repeats LOS at 21 and 23. The incident list is still empty. |
+| 24 | The third ONU confirms LOS. One inferred S2 incident appears at 3 of 4. The replay dates its opening to second 12 and cites the LOS polls at 20, 22 and 24. The fourth S2 ONU and the S3 ONU stay online. |
+| 25 | Further LOS polls and duplicate deliveries preserve the incident ID, count and opening time. |
+
+`SyrotechEponAdapterTest` verifies that three delayed stale reasons open zero incidents. A pair of replays places the first and last offline readings 90 and 91 seconds apart. The 90-second group qualifies with confirmations 103 seconds apart. The 91-second group opens zero incidents with confirmations 85 seconds apart. `CorrelationEngineTest` covers recovery, Dying Gasp, loss of visibility, telemetry freshness, and the delivery deadline for confirming evidence.
+
+From the repository root, `mvn -o -pl syrotech-adapter -am test` passed **64 tests**. The full `mvn test` run on Java 21 passed **70 tests** (4 simulator, 37 correlation, 23 adapter and 6 local HTTP) with zero failures, errors or skips. These replays use synthetic observations. Native alarm formats for the installed firmware still need a redacted field sample.
+
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.

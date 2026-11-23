@@ -70,13 +70,14 @@ public final class CorrelationEngine {
 
     public synchronized Snapshot snapshot() {
         if (cached != null) return cached;
-        var replay = new IncidentReplay(topology, policy);
         List<Alarm> observations = journal.values().stream().sorted(EVENT_ORDER).toList();
-        for (Alarm alarm : observations) {
-            Duration lag = Duration.between(alarm.eventTimestamp(), alarm.receiveTimestamp());
-            if (!lag.isNegative() && lag.compareTo(policy.maxDeliveryLag()) <= 0) replay.apply(alarm);
-        }
+        var replay = new IncidentReplay(topology, policy, observations.stream().filter(this::admissible).toList());
         cached = replay.snapshot(now, observations, publishedIds);
         return cached;
+    }
+
+    private boolean admissible(Alarm alarm) {
+        Duration lag = Duration.between(alarm.eventTimestamp(), alarm.receiveTimestamp());
+        return !lag.isNegative() && lag.compareTo(policy.maxDeliveryLag()) <= 0;
     }
 }

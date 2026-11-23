@@ -4,6 +4,7 @@ import in.roycommunication.noc.correlation.Alarm;
 import in.roycommunication.noc.correlation.CorrelationEngine;
 import in.roycommunication.noc.correlation.CorrelationPolicy;
 import in.roycommunication.noc.correlation.FiberTopology;
+import in.roycommunication.noc.correlation.Incident;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -15,16 +16,19 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static in.roycommunication.noc.adapter.syrotech.OnuStatusSnapshot.*;
 import static in.roycommunication.noc.adapter.syrotech.OnuStatusSnapshot.Status.*;
 import static in.roycommunication.noc.correlation.Alarm.Type.*;
+import static in.roycommunication.noc.correlation.CorrelationEngine.OnuState;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SyrotechEponAdapterTest {
     private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
     private static final String PON = "PON-03";
     private static final String ONU = "ONU-01";
+    private static final List<String> BRANCH_MEMBERS = List.of(ONU, "ONU-02", "ONU-03");
     private final SyrotechEponAdapter adapter = new SyrotechEponAdapter(Duration.ofSeconds(30));
 
     @ParameterizedTest
@@ -112,29 +116,24 @@ class SyrotechEponAdapterTest {
 
     @Test
     void correlationCountsOnlyLosSupportedByTheCurrentOutage() {
-        var members = List.of(ONU, "ONU-02", "ONU-03");
-        var inventory = new ArrayList<FiberTopology.Onu>();
         var rows = new ArrayList<OnuStatusSnapshot>();
         var retained = reason("LOS", -1);
-        for (String member : members) {
-            inventory.add(new FiberTopology.Onu(member, "S2", FiberTopology.Service.ACTIVE));
+        for (String member : BRANCH_MEMBERS) {
             rows.add(row(PON, member, ONLINE, 0, retained));
+            rows.add(row(PON, member, OFFLINE, 3, null));
             rows.add(row(PON, member, OFFLINE, 4, retained));
             rows.add(row(PON, member, ONLINE, 7, retained));
             rows.add(row(PON, member, OFFLINE, 10, reason("LOS", 9)));
         }
-        inventory.add(new FiberTopology.Onu("ONU-09", "S3", FiberTopology.Service.ACTIVE));
         rows.add(row(PON, "ONU-09", ONLINE, 0, null));
-        var topology = new FiberTopology(PON, List.of(new FiberTopology.Splitter("S2", PON, "F2"),
-                new FiberTopology.Splitter("S3", PON, "F3")), inventory);
-        var engine = new CorrelationEngine(topology, CorrelationPolicy.defaults());
+        var engine = branchEngine();
         var alarms = adapter.normalize(rows).stream().map(SyrotechEponAdapter.Observation::alarm).toList();
 
         Instant firstOutage = START.plusSeconds(4);
         alarms.stream().filter(alarm -> !alarm.eventTimestamp().isAfter(firstOutage)).forEach(engine::accept);
         var first = engine.snapshot();
         assertTrue(first.incidents().isEmpty());
-        for (String member : members) assertEquals(CorrelationEngine.OnuState.OFFLINE_UNKNOWN, first.onus().get(member).state());
+        for (String member : BRANCH_MEMBERS) assertEquals(OnuState.OFFLINE_UNKNOWN, first.onus().get(member).state());
 
         alarms.forEach(engine::accept); // Includes redelivery of the first readings with their original IDs.
         var second = engine.snapshot();
@@ -143,7 +142,89 @@ class SyrotechEponAdapterTest {
         var change = second.incidents().getFirst().latest();
         assertEquals("S2", change.scope().id());
         assertEquals(3, change.affected().size());
-        assertEquals(CorrelationEngine.OnuState.ONLINE, second.onus().get("ONU-09").state());
+        assertEquals(OnuState.ONLINE, second.onus().get("ONU-09").state());
+    }
+
+    @Test
+    void aLaterPollCanConfirmThreeEarlierUnknownOutagesOnOneSplitter() {
+        var rows = new ArrayList<OnuStatusSnapshot>();
+        var confirmations = new ArrayList<String>();
+        for (int i = 0; i < BRANCH_MEMBERS.size(); i++) {
+            String member = BRANCH_MEMBERS.get(i);
+            var cause = reason("LOS", 10 + i);
+            rows.add(row(PON, member, ONLINE, 0, null));
+            rows.add(row(PON, member, OFFLINE, 10 + i, null));
+            rows.add(row(PON, member, OFFLINE, 15, null));
+            var confirmation = row(PON, member, OFFLINE, 20 + 2 * i, cause);
+            rows.add(confirmation);
+            confirmations.add(confirmation.eventId());
+            rows.add(row(PON, member, OFFLINE, 25, cause));
+        }
+        rows.add(row(PON, ONU, OFFLINE, 21, reason("LOS", 10)));
+        rows.add(row(PON, ONU, OFFLINE, 23, reason("LOS", 10)));
+        rows.add(row(PON, "ONU-04", ONLINE, 0, null));
+        rows.add(row(PON, "ONU-09", ONLINE, 0, null));
+        var engine = branchEngine();
+        var alarms = adapter.normalize(rows).stream().map(SyrotechEponAdapter.Observation::alarm).toList();
+        Instant thirdConfirmation = START.plusSeconds(24);
+        for (Alarm alarm : alarms) {
+            if (alarm.eventTimestamp().isAfter(thirdConfirmation)) break;
+            engine.accept(alarm);
+            if (alarm.type() == ONU_OFFLINE_UNKNOWN) {
+                assertEquals(OnuState.OFFLINE_UNKNOWN, engine.snapshot().onus().get(alarm.onuId()).state());
+            }
+            if (alarm.eventTimestamp().isBefore(thirdConfirmation)) {
+                assertTrue(engine.snapshot().incidents().isEmpty());
+            }
+        }
+
+        var snapshot = engine.snapshot();
+        assertEquals(1, snapshot.incidents().size());
+        var incident = snapshot.incidents().getFirst();
+        assertEquals(1, incident.timeline().size());
+        var opening = incident.latest();
+        assertEquals(Incident.Basis.INFERRED_SHARED_LOS, opening.basis());
+        assertEquals("S2", opening.scope().id());
+        assertEquals(START.plusSeconds(12), opening.at());
+        assertEquals(Set.copyOf(BRANCH_MEMBERS), opening.affected());
+        assertEquals(Set.of(ONU, "ONU-02", "ONU-03", "ONU-04"), opening.eligible());
+        assertEquals(confirmations, opening.evidenceIds());
+        assertEquals(6L, snapshot.observations().stream().filter(alarm -> alarm.type() == ONU_OFFLINE_UNKNOWN).count());
+        assertEquals(OnuState.ONLINE, snapshot.onus().get("ONU-09").state());
+        alarms.reversed().forEach(engine::accept);
+        assertEquals(snapshot.incidents(), engine.snapshot().incidents());
+        assertEquals(rows.size(), engine.snapshot().observations().size());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"100, 12, 1", "101, 30, 0"})
+    void correlationUsesTheSpreadOfFirstOfflineReadingsEvenWhenLosPollsHaveADifferentSpread(
+            int lastOnset, int firstConfirmation, int expectedIncidents) {
+        var rows = new ArrayList<OnuStatusSnapshot>();
+        int[] onsets = {10, 95, lastOnset};
+        int[] confirmations = {firstConfirmation, 106, 115};
+        for (int i = 0; i < BRANCH_MEMBERS.size(); i++) {
+            String member = BRANCH_MEMBERS.get(i);
+            rows.add(row(PON, member, ONLINE, 0, null));
+            rows.add(row(PON, member, OFFLINE, onsets[i], null));
+            rows.add(row(PON, member, OFFLINE, confirmations[i], reason("LOS", onsets[i])));
+        }
+        rows.add(row(PON, "ONU-09", ONLINE, 0, null));
+        var engine = branchEngine();
+        adapter.normalize(rows).forEach(result -> engine.accept(result.alarm()));
+        assertEquals(expectedIncidents, engine.snapshot().incidents().size());
+        for (String member : BRANCH_MEMBERS) assertEquals(OnuState.LOS, engine.snapshot().onus().get(member).state());
+    }
+
+    private static CorrelationEngine branchEngine() {
+        var inventory = new ArrayList<FiberTopology.Onu>();
+        for (String member : List.of(ONU, "ONU-02", "ONU-03", "ONU-04")) {
+            inventory.add(new FiberTopology.Onu(member, "S2", FiberTopology.Service.ACTIVE));
+        }
+        inventory.add(new FiberTopology.Onu("ONU-09", "S3", FiberTopology.Service.ACTIVE));
+        var topology = new FiberTopology(PON, List.of(new FiberTopology.Splitter("S2", PON, "F2"),
+                new FiberTopology.Splitter("S3", PON, "F3")), inventory);
+        return new CorrelationEngine(topology, CorrelationPolicy.defaults());
     }
 
     private static LastDownReason reason(String text, long second) {

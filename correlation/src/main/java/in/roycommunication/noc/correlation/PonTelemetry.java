@@ -20,6 +20,7 @@ final class PonTelemetry {
 
     private final FiberTopology topology;
     private final CorrelationPolicy policy;
+    private final Map<String, Alarm> losConfirmations;
     private final Map<String, Alarm> lastObserved = new LinkedHashMap<>();
     private final Map<String, Alarm> visible = new HashMap<>();
     private final Map<String, Alarm> lossOnsets = new LinkedHashMap<>();
@@ -29,12 +30,42 @@ final class PonTelemetry {
     private Instant lastContact;
     private Alarm portAlarm;
 
-    PonTelemetry(FiberTopology topology, CorrelationPolicy policy) {
+    PonTelemetry(FiberTopology topology, CorrelationPolicy policy, List<Alarm> observations) {
         this.topology = topology;
         this.policy = policy;
+        this.losConfirmations = findLosConfirmations(observations);
     }
 
-    boolean observe(Alarm alarm) {
+    // A later LOS can explain earlier unknown readings in the same continuously observed outage.
+    private Map<String, Alarm> findLosConfirmations(List<Alarm> observations) {
+        var confirmations = new HashMap<String, Alarm>();
+        var nextOffline = new HashMap<String, Alarm>();
+        for (Alarm reading : observations.reversed()) {
+            String id = reading.onuId();
+            switch (reading.type()) {
+                case OLT_UNREACHABLE -> nextOffline.clear();
+                case ONU_ONLINE, ONU_DYING_GASP -> nextOffline.remove(id);
+                case ONU_LOS -> nextOffline.put(id, reading);
+                case ONU_OFFLINE_UNKNOWN -> {
+                    Alarm next = nextOffline.get(id);
+                    if (next != null && within(reading.eventTimestamp(), next.eventTimestamp(), policy.freshness())) {
+                        confirmations.put(reading.eventId(), confirmations.getOrDefault(next.eventId(), next));
+                        nextOffline.put(id, reading);
+                    } else {
+                        nextOffline.remove(id);
+                    }
+                }
+                default -> { }
+            }
+        }
+        return confirmations;
+    }
+
+    Alarm evidenceFor(Alarm reading) {
+        return losConfirmations.getOrDefault(reading.eventId(), reading);
+    }
+
+    boolean observe(Alarm alarm, Alarm evidence) {
         Instant at = alarm.eventTimestamp();
         if (alarm.onuId() != null) lastObserved.put(alarm.onuId(), alarm);
         if (alarm.type() == OLT_UNREACHABLE) {
@@ -53,7 +84,7 @@ final class PonTelemetry {
 
         String id = alarm.onuId();
         Alarm previous = visible.get(id);
-        boolean newlyLost = alarm.type() == ONU_LOS && topology.inService(id)
+        boolean newlyLost = evidence.type() == ONU_LOS && topology.inService(id)
                 && previous != null && previous.type() == ONU_ONLINE;
         if (newlyLost) {
             for (var domain : topology.domains()) {
@@ -63,9 +94,9 @@ final class PonTelemetry {
                 }
             }
             lossOnsets.put(id, alarm);
-        } else if (alarm.type() == ONU_LOS) {
+        } else if (evidence.type() == ONU_LOS) {
             Alarm onset = lossOnsets.get(id);
-            if (onset != null) onsetByRepeat.put(alarm.eventId(), onset.eventId());
+            if (onset != null) onsetByRepeat.put(evidence.eventId(), evidenceFor(onset).eventId());
         } else {
             lossOnsets.remove(id);
         }
@@ -80,9 +111,19 @@ final class PonTelemetry {
         return since != null && Duration.between(since, at).compareTo(limit) <= 0;
     }
 
-    OnuState state(String id, Instant at) {
+    private Alarm freshReading(String id, Instant at) {
         Alarm last = visible.get(id);
-        if (!reachable || last == null || !within(last.eventTimestamp(), at, policy.freshness())) return OnuState.UNKNOWN;
+        return reachable && last != null && within(last.eventTimestamp(), at, policy.freshness()) ? last : null;
+    }
+
+    boolean hasFreshLos(String id, Instant at) {
+        Alarm last = freshReading(id, at);
+        return last != null && evidenceFor(last).type() == ONU_LOS;
+    }
+
+    OnuState state(String id, Instant at) {
+        Alarm last = freshReading(id, at);
+        if (last == null) return OnuState.UNKNOWN;
         return switch (last.type()) {
             case ONU_ONLINE -> OnuState.ONLINE;
             case ONU_LOS -> OnuState.LOS;
@@ -124,7 +165,7 @@ final class PonTelemetry {
         var result = new LinkedHashMap<String, Alarm>();
         lossOnsets.forEach((id, onset) -> {
             if (eligible.contains(id) && within(onset.eventTimestamp(), at, policy.window())
-                    && state(id, at) == OnuState.LOS) result.put(id, onset);
+                    && hasFreshLos(id, at)) result.put(id, evidenceFor(onset));
         });
         return result;
     }
