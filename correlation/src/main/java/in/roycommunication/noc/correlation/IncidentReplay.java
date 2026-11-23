@@ -204,16 +204,17 @@ final class IncidentReplay {
         }
 
         void record(Instant at, Status status, List<String> evidence) {
+            var scope = basis == Basis.OBSERVED_PORT_DOWN ? topology.observedPort() : domain.scope();
             Set<String> affected = new LinkedHashSet<>();
             for (String onu : impacted) {
                 if (telemetry.state(onu, at) == OnuState.LOS) affected.add(onu);
             }
             if (!timeline.isEmpty()) {
                 var previous = timeline.getLast();
-                if (previous.status() == status && previous.basis() == basis && previous.scope().equals(domain.scope())
+                if (previous.status() == status && previous.basis() == basis && previous.scope().equals(scope)
                         && previous.affected().equals(affected) && previous.eligible().equals(eligible)) return;
             }
-            timeline.add(new Incident.Change(at, domain.scope(), basis, status, affected, eligible, evidence));
+            timeline.add(new Incident.Change(at, scope, basis, status, affected, eligible, evidence));
         }
     }
 }

@@ -40,6 +40,7 @@ class CorrelationEngineTest {
         assertEquals(Kind.PON, port.latest().scope().kind());
         assertEquals(PON, port.latest().scope().id());
         assertEquals(Basis.INFERRED_SHARED_LOS, port.latest().basis());
+        assertEquals(List.of("F1"), port.latest().scope().candidateSegments());
         assertEquals(16, port.latest().affected().size());
         assertEquals(16, port.latest().eligible().size());
         assertEquals(PortState.REACHABLE, engine.snapshot().portState());
@@ -53,6 +54,7 @@ class CorrelationEngineTest {
         Incident observed = only(active(engine));
         assertEquals(port.id(), observed.id());
         assertEquals(Basis.OBSERVED_PORT_DOWN, observed.latest().basis());
+        assertTrue(observed.latest().scope().candidateSegments().isEmpty());
     }
 
     @Test

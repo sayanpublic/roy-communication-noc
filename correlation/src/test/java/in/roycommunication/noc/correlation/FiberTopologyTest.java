@@ -1,5 +1,6 @@
 package in.roycommunication.noc.correlation;
 
+import in.roycommunication.noc.simulator.OltSimulator;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -12,6 +13,39 @@ import static in.roycommunication.noc.correlation.ReplayFixture.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FiberTopologyTest {
+    @Test
+    void indistinguishableSplitterInputsShareOneIncidentWithBothCandidateSegments() {
+        var engine = new CorrelationEngine(cascade("F4"), CorrelationPolicy.defaults());
+        OltSimulator.branchLos().stream().map(ReplayFixture::normalize).forEach(engine::accept);
+        engine.advanceTo(START.plusSeconds(157));
+
+        Incident incident = only(engine.snapshot().incidents());
+        assertEquals(Incident.Status.RESOLVED, incident.latest().status());
+        for (var change : incident.timeline()) {
+            assertEquals(Incident.Basis.INFERRED_SHARED_LOS, change.basis());
+            assertEquals(Kind.SPLITTER, change.scope().kind());
+            assertEquals(List.of("F2", "F4"), change.scope().candidateSegments());
+            assertNull(change.scope().inputSegment());
+        }
+    }
+
+    @Test
+    void anUnlabelledEquivalentInputLeavesTheSingleSegmentUnknown() {
+        var engine = new CorrelationEngine(cascade(null), CorrelationPolicy.defaults());
+        OltSimulator.branchLos().stream().map(ReplayFixture::normalize).forEach(engine::accept);
+        Scope scope = only(engine.snapshot().incidents()).latest().scope();
+        assertEquals(List.of("F2"), scope.candidateSegments());
+        assertNull(scope.inputSegment());
+    }
+
+    private static FiberTopology cascade(String downstreamSegment) {
+        var splitters = List.of(new Splitter("S4", "S2", downstreamSegment), new Splitter("S3", "S1", "F3"),
+                new Splitter("S2", "S1", "F2"), new Splitter("S1", PON, "F1"));
+        var onus = new ArrayList<Onu>();
+        for (int i = 1; i <= 16; i++) onus.add(new Onu(onu(i), i <= 8 ? "S4" : "S3", Service.ACTIVE));
+        return new FiberTopology(PON, splitters, onus);
+    }
+
     @Test
     void belowThresholdChildSplittersCanJointlySupportTheirSharedParent() {
         var splitters = List.of(new Splitter("S1", PON, "F1"), new Splitter("S2", "S1", "F2"),

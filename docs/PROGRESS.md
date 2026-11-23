@@ -64,5 +64,14 @@ Run `mvn test` from the repository root to reproduce the suite and print the S2 
 
 The suite also checks isolated LOS and Dying Gasp, PON-wide clusters, direct port-down precedence, stale and unreachable telemetry, frozen pre-outage eligibility, duplicate and late delivery, overlapping and independent groups, missing and invalid connectivity, and interrupted recovery. The history is process-local and sized for finite replays. Thresholds, freshness, and recovery timing still need field calibration.
 
+### 2026-11-23 — Incident IDs and cascaded fiber segments
+
+Follow-up to the review of `80f8324` on `codex/dev-olt-simulator`. The two new reproduction cases initially showed the current S2 outage moving from `/1` to `/2` and a two-input cascade reporting only F4. Updated `CorrelationEngine`, `IncidentReplay`, `PonTelemetry`, and `FiberTopology`, along with the engine, topology, and simulator replay tests.
+
+- **Same-splitter backfill.** The current incident opens at replay second 66. Alarms received at second 75 reveal a separate S2 outage that opened at second 11 and resolved at second 51. The test checks the current ID after each late delivery, the recovered episode's distinct ID, and equality of both histories after duplicate delivery. Another test moves an ongoing outage's opening from second 46 to second 16 and checks its ID survives the correction.
+- **Indistinguishable paths.** S2/F2 and S4/F4 serving the same eight ONUs produce one inferred incident with both candidate segments throughout its history. A further test covers an unlabelled input in that chain. The standard S2 replay still lists F2 alone and resolves at `2026-01-01T00:02:37Z`. The whole-PON test also checks the common feeder candidate and the observed port-down scope.
+
+From the repository root, `mvn test` and `mvn -o test` each passed **32 tests** with zero failures, errors, or skips. Four cover the simulator and 28 cover correlation, topology, and replay. ID reservations live in the engine's memory. The [decision log](DECISIONS.md) records the scope and identity semantics for a future API.
+
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.

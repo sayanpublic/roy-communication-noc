@@ -16,12 +16,25 @@ public final class FiberTopology {
     public enum Kind { PON, SPLITTER }
     public record Splitter(String id, String parentId, String inputSegment) {}
     public record Onu(String id, String parentId, Service service) {}
-    public record Scope(Kind kind, String id, String inputSegment) {}
+    /** Known segment IDs run upstream to downstream. inputSegment is set for a single identified input. */
+    public record Scope(Kind kind, String id, String inputSegment, List<String> candidateSegments) {
+        public Scope {
+            candidateSegments = List.copyOf(candidateSegments);
+            if (inputSegment != null && !candidateSegments.equals(List.of(inputSegment))) {
+                throw new IllegalArgumentException("A single input must match the sole candidate segment");
+            }
+        }
+
+        public Scope(Kind kind, String id, String inputSegment) {
+            this(kind, id, inputSegment, inputSegment == null ? List.of() : List.of(inputSegment));
+        }
+    }
     record Domain(Scope scope, Set<String> onus) {}
 
     private final Map<String, Onu> inventory = new LinkedHashMap<>();
     private final List<String> problems = new ArrayList<>();
     private final List<Domain> domains = new ArrayList<>();
+    private final Scope observedPort;
     private final Domain port;
 
     public FiberTopology(String ponPort, List<Splitter> splitters, List<Onu> onus) {
@@ -47,21 +60,37 @@ public final class FiberTopology {
                 descendants.get(ancestor).add(onu.id());
             }
         }
-        port = new Domain(new Scope(Kind.PON, ponPort, null), Set.copyOf(inventory.keySet()));
-        if (!problems.isEmpty()) return;
+        Set<String> portOnus = Set.copyOf(inventory.keySet());
+        observedPort = new Scope(Kind.PON, ponPort, null);
+        if (!problems.isEmpty()) {
+            port = new Domain(observedPort, portOnus);
+            return;
+        }
 
-        // Unary cascades have the same observable footprint. Keep the deepest proper subtree.
-        Set<Set<String>> footprints = new HashSet<>();
-        footprints.add(port.onus());
-        byId.values().stream().sorted(Comparator.comparingInt((Splitter s) -> depths.get(s.id())).reversed())
+        // Inputs with identical physical descendants are one candidate domain, even in a long cascade.
+        Map<Set<String>, List<Splitter>> chains = new LinkedHashMap<>();
+        byId.values().stream().sorted(Comparator.comparingInt(s -> depths.get(s.id())))
                 .forEach(splitter -> {
                     Set<String> members = Set.copyOf(descendants.get(splitter.id()));
-                    if (!members.isEmpty() && footprints.add(members)) {
-                        domains.add(new Domain(new Scope(Kind.SPLITTER, splitter.id(), splitter.inputSegment()), members));
-                    }
+                    if (!members.isEmpty()) chains.computeIfAbsent(members, key -> new ArrayList<>()).add(splitter);
                 });
+        port = new Domain(inferredScope(ponPort, Kind.PON, chains.getOrDefault(portOnus, List.of())), portOnus);
+        chains.remove(portOnus);
+        chains.forEach((members, chain) -> {
+            // Retain the existing deepest splitter ID as the branch label.
+            Scope scope = inferredScope(chain.getLast().id(), Kind.SPLITTER, chain);
+            domains.add(new Domain(scope, members));
+        });
         domains.sort(Comparator.comparingInt(domain -> domain.onus().size()));
         domains.add(port);
+    }
+
+    private static Scope inferredScope(String id, Kind kind, List<Splitter> chain) {
+        List<String> segments = chain.stream().map(Splitter::inputSegment)
+                .filter(segment -> segment != null && !segment.isBlank()).distinct().toList();
+        // An unlabelled input still counts as an alternative to any named segment on the chain.
+        String uniqueInput = kind == Kind.SPLITTER && chain.size() == 1 && !segments.isEmpty() ? segments.getFirst() : null;
+        return new Scope(kind, id, uniqueInput, segments);
     }
 
     private boolean register(Set<String> ids, String id) {
@@ -87,6 +116,7 @@ public final class FiberTopology {
     public String ponPort() { return port.scope().id(); }
     public List<String> problems() { return List.copyOf(problems); }
     Domain port() { return port; }
+    Scope observedPort() { return observedPort; }
     List<Domain> domains() { return List.copyOf(domains); }
     boolean confinedToChild(Domain parent, Set<String> affected) {
         return domains.stream().anyMatch(child -> !child.equals(parent)

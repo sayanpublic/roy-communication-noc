@@ -23,6 +23,7 @@ class SimulatorReplayTest {
         Incident first = only(engine.snapshot().incidents());
         var opened = first.latest();
         assertEquals(new FiberTopology.Scope(FiberTopology.Kind.SPLITTER, "S2", "F2"), opened.scope());
+        assertEquals(List.of("F2"), opened.scope().candidateSegments());
         assertEquals(Basis.INFERRED_SHARED_LOS, opened.basis());
         assertEquals(Status.OPEN, opened.status());
         assertEquals(START.plusSeconds(55), opened.at());
