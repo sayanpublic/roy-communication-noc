@@ -38,6 +38,7 @@ public final class CorrelationEngine {
     private final FiberTopology topology;
     private final CorrelationPolicy policy;
     private final Map<String, Alarm> journal = new LinkedHashMap<>();
+    private final IncidentReplay.PublishedIds publishedIds = new IncidentReplay.PublishedIds();
     private Instant now = Instant.MIN;
     private Snapshot cached;
 
@@ -75,7 +76,7 @@ public final class CorrelationEngine {
             Duration lag = Duration.between(alarm.eventTimestamp(), alarm.receiveTimestamp());
             if (!lag.isNegative() && lag.compareTo(policy.maxDeliveryLag()) <= 0) replay.apply(alarm);
         }
-        cached = replay.snapshot(now, observations);
+        cached = replay.snapshot(now, observations, publishedIds);
         return cached;
     }
 }

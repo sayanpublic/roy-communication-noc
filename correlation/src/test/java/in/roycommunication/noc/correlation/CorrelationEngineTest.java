@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -224,6 +225,58 @@ class CorrelationEngineTest {
         }
         assertEquals(2, active(engine).size());
         assertTrue(active(engine).stream().anyMatch(i -> i.id().equals(established) && i.latest().scope().id().equals("S3")));
+    }
+
+    @Test
+    void lateRecoveredOutageOnTheSameSplitterPreservesPublishedIdsAndBothHistories() {
+        var engine = engine();
+        online(engine, 16, 0);
+        var deliveries = new ArrayList<Alarm>();
+        for (int i = 1; i <= 8; i++) deliveries.add(alarm(ONU_LOS, onu(i), 60 + i));
+        deliveries.forEach(engine::accept);
+        Incident published = only(active(engine));
+        assertEquals(START.plusSeconds(66), published.timeline().getFirst().at());
+
+        // Six earlier LOS at 6..11s, followed by recovery at 16..21s. The whole backfill arrives at 75s.
+        for (var type : List.of(ONU_LOS, ONU_ONLINE)) {
+            int firstOffset = type == ONU_LOS ? 5 : 15;
+            for (int i = 1; i <= 6; i++) {
+                Alarm late = receivedAt(alarm(type, onu(i), firstOffset + i), 75);
+                deliveries.add(late);
+                engine.accept(late);
+                assertEquals(published.id(), only(active(engine)).id());
+            }
+        }
+        List<Incident> histories = engine.snapshot().incidents();
+        assertEquals(2, histories.size());
+        Incident earlier = histories.getFirst();
+        assertEquals(START.plusSeconds(11), earlier.timeline().getFirst().at());
+        assertEquals(Status.RESOLVED, earlier.latest().status());
+        assertEquals(START.plusSeconds(51), earlier.latest().at());
+        assertNotEquals(published.id(), earlier.id());
+        assertEquals(published, histories.getLast());
+
+        for (Alarm delivered : deliveries.reversed()) engine.accept(receivedAt(delivered, 85));
+        assertEquals(histories, engine.snapshot().incidents());
+        assertEquals(36, engine.snapshot().observations().size());
+    }
+
+    @Test
+    void lateOnsetsCanCorrectTheOpeningTimeOfAnAlreadyPublishedIncident() {
+        var engine = engine();
+        online(engine, 16, 0);
+        for (int i = 1; i <= 6; i++) report(engine, ONU_LOS, i, 40 + i);
+        Incident published = only(active(engine));
+        assertEquals(START.plusSeconds(46), published.timeline().getFirst().at());
+        for (int i = 1; i <= 6; i++) engine.accept(receivedAt(alarm(ONU_LOS, onu(i), 10 + i), 60));
+        Incident corrected = only(engine.snapshot().incidents());
+        assertEquals(published.id(), corrected.id());
+        assertEquals(START.plusSeconds(16), corrected.timeline().getFirst().at());
+    }
+
+    private static Alarm receivedAt(Alarm alarm, long second) {
+        return new Alarm(alarm.eventId(), alarm.ponPort(), alarm.onuId(), alarm.type(),
+                alarm.eventTimestamp(), START.plusSeconds(second));
     }
 
     @Test

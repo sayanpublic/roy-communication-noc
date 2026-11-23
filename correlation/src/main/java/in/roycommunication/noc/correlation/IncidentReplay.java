@@ -3,6 +3,7 @@ package in.roycommunication.noc.correlation;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,7 @@ final class IncidentReplay {
     private final CorrelationPolicy policy;
     private final PonTelemetry telemetry;
     private final List<Tracked> incidents = new ArrayList<>();
-    private final Map<FiberTopology.Scope, Integer> openings = new HashMap<>();
+    private final Map<String, Tracked> ownerByAlarm = new HashMap<>();
 
     IncidentReplay(FiberTopology topology, CorrelationPolicy policy) {
         this.topology = topology;
@@ -36,8 +37,9 @@ final class IncidentReplay {
         if (alarm.type() == Alarm.Type.PON_PORT_DOWN && telemetry.portDown()) {
             var candidate = telemetry.portEvidence(at);
             Tracked incident = associate(candidate, Basis.OBSERVED_PORT_DOWN, at);
+            ownerByAlarm.put(alarm.eventId(), incident);
             var ids = new ArrayList<>(evidenceIds(candidate));
-            ids.add(alarm.eventId());
+            ids.addFirst(alarm.eventId());
             evidence.put(incident, ids);
         } else if (newlyLost && !telemetry.portDown()) {
             for (var candidate : inferredScopes(at)) {
@@ -47,7 +49,7 @@ final class IncidentReplay {
         }
         for (Tracked incident : incidents) {
             if (!incident.active()) continue;
-            if (newlyLost && incident.eligible.contains(alarm.onuId())) incident.impacted.add(alarm.onuId());
+            if (newlyLost) incident.addLoss(alarm);
             boolean recovered = incident.recovered(at);
             if (!recovered) incident.recoveringSince = null;
             else if (incident.recoveringSince == null) incident.recoveringSince = at;
@@ -87,10 +89,7 @@ final class IncidentReplay {
                 .toList();
         Tracked owner;
         if (overlapping.isEmpty()) {
-            var scope = domain.scope();
-            int episode = openings.merge(scope, 1, Integer::sum);
-            String path = scope.kind() == FiberTopology.Kind.PON ? topology.ponPort() : topology.ponPort() + "/" + scope.id();
-            owner = new Tracked(path + "/" + episode, domain, basis);
+            owner = new Tracked(domain, basis);
             owner.eligible.addAll(candidate.eligible());
             incidents.add(owner);
         } else {
@@ -104,13 +103,11 @@ final class IncidentReplay {
             for (Tracked other : overlapping.subList(1, overlapping.size())) {
                 owner.eligible.addAll(other.eligible);
                 owner.impacted.addAll(other.impacted);
-                other.supersededBy = owner.id;
+                other.supersededBy = owner;
                 other.record(at, Status.SUPERSEDED, evidenceIds(candidate));
             }
         }
-        for (String id : candidate.losses().keySet()) {
-            if (owner.eligible.contains(id)) owner.impacted.add(id);
-        }
+        candidate.losses().values().forEach(owner::addLoss);
         return owner;
     }
 
@@ -128,26 +125,64 @@ final class IncidentReplay {
         }
     }
 
-    CorrelationEngine.Snapshot snapshot(Instant at, List<Alarm> observations) {
+    CorrelationEngine.Snapshot snapshot(Instant at, List<Alarm> observations, PublishedIds publishedIds) {
         advanceTimers(at, true);
+        publishedIds.assign(this);
         return new CorrelationEngine.Snapshot(at, telemetry.portState(at), telemetry.readings(at), observations,
-                incidents.stream().map(i -> new Incident(i.id, i.timeline, i.supersededBy)).toList());
+                incidents.stream().map(Tracked::snapshot).toList());
+    }
+
+    /** Lives with the engine, across projections. A public number belongs to its original alarm evidence. */
+    static final class PublishedIds {
+        private final Map<String, List<String>> openingEvidenceById = new LinkedHashMap<>();
+        private final Map<String, Integer> lastNumberByPath = new HashMap<>();
+
+        private void assign(IncidentReplay replay) {
+            // Reconnect existing links before allocating any numbers to newly discovered history.
+            for (var binding : openingEvidenceById.entrySet()) {
+                for (String alarm : binding.getValue()) {
+                    Tracked owner = replay.ownerByAlarm.get(replay.telemetry.causalAlarmId(alarm));
+                    if (owner != null && owner.id == null) {
+                        owner.id = binding.getKey();
+                        break;
+                    }
+                }
+            }
+            for (Tracked incident : replay.incidents) {
+                if (incident.id != null) continue;
+                Incident.Change opening = incident.timeline.getFirst();
+                String path = replay.topology.ponPort();
+                if (opening.scope().kind() == FiberTopology.Kind.SPLITTER) path += "/" + opening.scope().id();
+                incident.id = path + "/" + lastNumberByPath.merge(path, 1, Integer::sum);
+                openingEvidenceById.put(incident.id, opening.evidenceIds());
+            }
+        }
     }
 
     private final class Tracked {
-        final String id;
+        String id;
         final List<Incident.Change> timeline = new ArrayList<>();
         final Set<String> eligible = new LinkedHashSet<>();
         final Set<String> impacted = new LinkedHashSet<>();
         FiberTopology.Domain domain;
         Basis basis;
         Instant recoveringSince;
-        String supersededBy;
+        Tracked supersededBy;
 
-        Tracked(String id, FiberTopology.Domain domain, Basis basis) {
-            this.id = id;
+        Tracked(FiberTopology.Domain domain, Basis basis) {
             this.domain = domain;
             this.basis = basis;
+        }
+
+        Incident snapshot() {
+            return new Incident(id, timeline, supersededBy == null ? null : supersededBy.id);
+        }
+
+        void addLoss(Alarm loss) {
+            if (eligible.contains(loss.onuId())) {
+                impacted.add(loss.onuId());
+                ownerByAlarm.putIfAbsent(loss.eventId(), this);
+            }
         }
 
         boolean active() {

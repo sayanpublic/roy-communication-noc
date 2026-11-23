@@ -23,6 +23,7 @@ final class PonTelemetry {
     private final Map<String, Alarm> lastObserved = new LinkedHashMap<>();
     private final Map<String, Alarm> visible = new HashMap<>();
     private final Map<String, Alarm> lossOnsets = new LinkedHashMap<>();
+    private final Map<String, String> onsetByRepeat = new HashMap<>();
     private final Map<FiberTopology.Domain, Set<String>> cohorts = new HashMap<>();
     private boolean reachable = true;
     private Instant lastContact;
@@ -62,12 +63,18 @@ final class PonTelemetry {
                 }
             }
             lossOnsets.put(id, alarm);
-        } else if (alarm.type() != ONU_LOS) {
+        } else if (alarm.type() == ONU_LOS) {
+            Alarm onset = lossOnsets.get(id);
+            if (onset != null) onsetByRepeat.put(alarm.eventId(), onset.eventId());
+        } else {
             lossOnsets.remove(id);
         }
         visible.put(id, alarm);
         return newlyLost;
     }
+
+    // A late onset can turn a previously published LOS into a repeat of the same continuous loss.
+    String causalAlarmId(String eventId) { return onsetByRepeat.getOrDefault(eventId, eventId); }
 
     private boolean within(Instant since, Instant at, Duration limit) {
         return since != null && Duration.between(since, at).compareTo(limit) <= 0;
