@@ -13,7 +13,7 @@ Develop a private Network Operations Center (NOC) for Roy Communication, a local
 - Write focused automated tests for single-ONU loss, multiple shared-branch LOS events, whole-PON outage, Dying Gasp/power events, ONU recovery, event duplicates, telemetry loss, overlapping groups and topology errors.
 - Before each milestone, briefly explain the plan, files affected, and acceptance tests. Run available tests, report actual results, and summarize changed files and remaining risks.
 - At the end of each coding task, update `docs/PROGRESS.md`; record significant architecture decisions in `docs/DECISIONS.md`. Ask for missing hardware/firmware details rather than inventing OIDs or vendor commands.
-- Make small, reviewable Git commits when requested; do not overwrite unrelated local changes.
+- After each task that changes repository files, make small, reviewable commits and push them to the current development branch on its remote. Preserve unrelated local work.
 
 ## Safety and privacy boundaries
 - NO direct configuration changes, reboots, firmware updates, destructive tests, fiber disconnections, or modifications to live routers/OLTs without explicit, task-specific owner approval and an agreed maintenance window.
