@@ -2,7 +2,7 @@
 
 ## Current status
 
-The Java 21 simulator, correlation engine, and local read-only Spring Boot API run on synthetic data. The API exposes four fixed views of observed ONU and PON state and inferred incident history. See [startup and example requests](#2026-11-23--local-read-only-replay-api).
+The Java 21 simulator, correlation engine, and local read-only Spring Boot API run on synthetic data. The API exposes six fixed views of observed ONU and PON state and inferred incident history. The Network Replay dashboard at the API root displays the topology, incident timeline and observation journal. See [startup and example requests](#2026-11-23--local-read-only-replay-api).
 
 The offline Syrotech EPON adapter accepts synthetic ONU status snapshots and emits the correlation engine's normalized alarms. The installed OLT reports hardware `V1.2.4`, firmware `V2.03.77R` and build date `2025-08-29`. [Hardware and source notes](PROJECT_CONTEXT.md#references-for-the-syrotech-epon-adapter)
 
@@ -143,6 +143,14 @@ On `codex/dev-olt-simulator` at `fab19a1`, the new adapter-to-engine test reprod
 `SyrotechEponAdapterTest` verifies that three delayed stale reasons open zero incidents. A pair of replays places the first and last offline readings 90 and 91 seconds apart. The 90-second group qualifies with confirmations 103 seconds apart. The 91-second group opens zero incidents with confirmations 85 seconds apart. `CorrelationEngineTest` covers recovery, Dying Gasp, loss of visibility, telemetry freshness, and the delivery deadline for confirming evidence.
 
 From the repository root, `mvn -o -pl syrotech-adapter -am test` passed **64 tests**. The full `mvn test` run on Java 21 passed **70 tests** (4 simulator, 37 correlation, 23 adapter and 6 local HTTP) with zero failures, errors or skips. These replays use synthetic observations. Native alarm formats for the installed firmware still need a redacted field sample.
+
+### 2026-11-24 — Network Replay dashboard
+
+Build using `mvn package`, run `java -jar api/target/api-0.1.0-SNAPSHOT.jar`, and open [the local dashboard](http://127.0.0.1:8080/). The dashboard reads the existing replay API. Select a scenario and checkpoint to inspect the topology, affected counts and evidence. Selecting an ONU filters the journal. Candidate segments are inferred from the simulated ONUs and topology.
+
+The delayed LOS fixtures go through the Syrotech adapter and the correlation engine. The pending view shows the three unknown causes without a shared incident. The confirmed view shows one incident affecting 3 of 4 eligible ONUs, with a historical opening at 00:00:12 UTC and the last opening evidence received at 00:00:24.250 UTC.
+
+The Java 21 Maven suite passed **72 tests**, including eight HTTP integration tests. Browser checks covered recovery, the delayed LOS checkpoints, evidence filtering and cascaded candidate segments.
 
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.

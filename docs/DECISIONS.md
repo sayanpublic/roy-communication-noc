@@ -61,3 +61,7 @@ An online reading, including recovery, produces `ONU_ONLINE`. An offline reading
 The caller also sets the maximum age of the reason at the time of the status reading. Tests use an inclusive 30-second limit. Both the age and the outage interval must match. The synthetic labels `LOS` and `Loss of Signal` map to `ONU_LOS`, and `Dying Gasp` maps to `ONU_DYING_GASP`. All other offline observations produce `ONU_OFFLINE_UNKNOWN`. Field validation must establish which native values and timestamps carry these meanings.
 
 The adapter checks the complete replay for conflicting explicit causes within one uninterrupted offline interval. If eligible reports disagree between LOS and Dying Gasp, their normalized cause is unknown throughout that interval. Each original reason remains available for inspection. A generic link-loss label or a PON-level alarm also leaves an offline ONU's cause unknown. The related manual supplies fixture vocabulary. [Source notes](PROJECT_CONTEXT.md#references-for-the-syrotech-epon-adapter)
+
+## ADR-010 — Same-origin Network Replay dashboard
+
+Spring Boot serves the dashboard at the API root. The replay responses include the synthetic splitter connections and ONU parent assignments so the topology display uses the same inputs as the correlation engine. The browser renders observations and inferred incidents separately. The replay view uses static HTML, CSS and JavaScript and requires no separate frontend build.

@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-record ReplayView(String viewId, Instant replayTimestamp, ObservedPon observed, List<IncidentView> incidents) {
+record ReplayView(String viewId, Instant replayTimestamp, ObservedPon observed, Topology topology, List<IncidentView> incidents) {
+    record Topology(List<FiberTopology.Splitter> splitters, Map<String, String> onuParents) {}
+
     record ObservedPon(String ponPort, CorrelationEngine.PortState state,
                        Map<String, CorrelationEngine.OnuReading> onus, List<Alarm> alarms) {}
 
@@ -33,10 +35,10 @@ record ReplayView(String viewId, Instant replayTimestamp, ObservedPon observed, 
         }
     }
 
-    static ReplayView from(String viewId, String ponPort, CorrelationEngine.Snapshot snapshot) {
+    static ReplayView from(String viewId, String ponPort, CorrelationEngine.Snapshot snapshot, Topology topology) {
         var observed = new ObservedPon(ponPort, snapshot.portState(),
                 Collections.unmodifiableSortedMap(new TreeMap<>(snapshot.onus())), snapshot.observations());
-        return new ReplayView(viewId, snapshot.asOf(), observed,
+        return new ReplayView(viewId, snapshot.asOf(), observed, topology,
                 snapshot.incidents().stream().map(IncidentView::from).toList());
     }
 }

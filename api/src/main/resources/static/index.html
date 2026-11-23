@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roy Communication · Network Replay</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --background: #0a1418; --panel: #102026; --raised: #15282f; --line: #2a3c43;
+    --ink: #e9f3ef; --muted: #a8bbb9; --green: #6ce5b0; --orange: #ff9b8b; --amber: #f4c36a;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font: 16px/1.5 system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); background: var(--background); }
+  [hidden] { display: none !important; }
+  a { color: var(--green); }
+  button, select, input { font: inherit; }
+  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--green); outline-offset: 3px;
+  }
+  .shell { width: min(100% - 3rem, 1312px); margin-inline: auto; }
+  header { border-bottom: 1px solid var(--line); background: #0d1a1f; }
+  .masthead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.1rem; }
+  .brand { display: flex; align-items: center; gap: .8rem; font-weight: 650; }
+  .mark {
+    display: inline-grid; place-items: center; width: 2.15rem; aspect-ratio: 1;
+    font: 800 .74rem var(--mono); letter-spacing: -.08em; color: #08251e; background: var(--green); border-radius: .5rem;
+  }
+  .mode { color: var(--green); border: 1px solid #356155; padding: .26rem .65rem; border-radius: 999px; font-size: .83rem; }
+  main { padding-block: 2.1rem 3rem; }
+  .intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.3rem; }
+  h1, h2, p { margin: 0; }
+  h1 { font-size: clamp(2rem, 4.5vw, 3.25rem); line-height: 1.05; letter-spacing: -.055em; }
+  h2 { font-size: 1.1rem; letter-spacing: -.025em; }
+  .intro p { color: var(--muted); margin-top: .45rem; }
+  .field { display: grid; gap: .35rem; font-size: .87rem; color: var(--muted); }
+  select, input[type=search] { border: 1px solid var(--line); border-radius: .45rem; color: var(--ink); background: #0b181d; padding: .58rem .7rem; }
+  .intro select { min-width: min(17rem, 100%); }
+  .checkpoints { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: .8rem; }
+  button { background: var(--panel); color: var(--muted); border: 1px solid var(--line); padding: .43rem .75rem; border-radius: .4rem; cursor: pointer; }
+  button[aria-pressed=true] { color: var(--green); background: #17352e; border-color: #40876e; }
+  .stamp { color: var(--muted); font-size: .83rem; margin-bottom: 1rem; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin-bottom: .8rem; }
+  .metric, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: .7rem; }
+  .metric { min-width: 0; padding: .82rem 1rem; }
+  .metric dt { color: var(--muted); font-size: .85rem; }
+  .metric dd { margin: .17rem 0 0; font: 600 clamp(1.15rem, 3vw, 1.85rem)/1.3 var(--mono); }
+  .boards { display: grid; grid-template-columns: 1.18fr 1fr; gap: .8rem; }
+  .panel { min-width: 0; padding: 1rem; }
+  .head { display: flex; justify-content: space-between; align-items: start; gap: .7rem; margin-bottom: .85rem; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); }
+  .panel p { font-size: .86rem; }
+  .pill { font-size: .76rem; border-radius: .3rem; padding: .11rem .38rem; background: #23353c; white-space: nowrap; }
+  .positive { color: var(--green); }
+  .loss { color: var(--orange); }
+  .attention { color: var(--amber); }
+  .fiber { margin-left: 1rem; padding: .15rem 0 .34rem .8rem; border-left: 1px solid #537078; color: var(--muted); font-size: .79rem; }
+  .fiber.candidate { color: var(--amber); border-color: var(--amber); }
+  .node { padding: .55rem .7rem; background: var(--raised); border: 1px solid var(--line); border-radius: .4rem; display: flex; gap: .45rem; justify-content: space-between; align-items: center; }
+  .node strong { font-size: .87rem; }
+  .children { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .65rem; }
+  .onu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(3rem, 1fr)); gap: .35rem; margin-top: .48rem; }
+  .onu { padding: .26rem .35rem; font: 500 .8rem var(--mono); min-height: 2rem; background: #102a26; color: var(--green); }
+  .onu.loss { background: #3a272a; color: var(--orange); }
+  .onu.attention { background: #362e21; color: var(--amber); }
+  .onu.muted { background: #223239; color: var(--muted); }
+  .legend { display: flex; gap: .7rem; flex-wrap: wrap; margin-top: .8rem; font-size: .8rem; color: var(--muted); }
+  .legend i { display: inline-block; width: .45rem; aspect-ratio: 1; border-radius: 50%; background: currentColor; margin-right: .3rem; vertical-align: .1em; }
+  .incident { border-left: 3px solid var(--amber); padding: .55rem .7rem; background: var(--raised); border-radius: .25rem; }
+  .incident.closed { border-color: var(--green); }
+  .incident + .incident { margin-top: .85rem; }
+  .incident > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: .4rem; flex-wrap: wrap; }
+  .incident .info { margin-top: .35rem; }
+  .chart { display: grid; grid-template-columns: 3fr 1fr; gap: .7rem; margin-top: .7rem; align-items: stretch; }
+  .chart-rows { display: grid; gap: .3rem; }
+  .plot-row { display: grid; grid-template-columns: 4.3rem 1fr 3.6rem; align-items: center; gap: .5rem; font: .76rem var(--mono); }
+  .track { display: block; height: .4rem; background: #30444a; border-radius: 999px; overflow: hidden; }
+  .fill { display: block; height: 100%; background: var(--amber); }
+  .peak { align-self: start; padding: .4rem .65rem; border-left: 1px solid var(--line); line-height: 1.3; }
+  .peak strong { display: block; font: 650 1.55rem var(--mono); }
+  .quiet { padding: 1rem .75rem; background: var(--raised); border-radius: .4rem; }
+  .journal { margin-top: .8rem; }
+  .journal .head { align-items: center; flex-wrap: wrap; }
+  .tools { display: flex; gap: .45rem; flex-wrap: wrap; }
+  .tools select, .tools input, .tools button { font-size: .85rem; }
+  .scroll { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  th, td { padding: .54rem .55rem; border-bottom: 1px solid var(--line); font-size: .86rem; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 550; }
+  td:last-child { color: var(--muted); }
+  .empty { padding: .7rem; color: var(--muted); }
+  details { margin-top: .6rem; font-size: .85rem; color: var(--muted); }
+  summary { cursor: pointer; }
+  footer { color: var(--muted); border-top: 1px solid var(--line); padding-block: 1rem; font-size: .82rem; }
+  @media (max-width: 860px) { .boards { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) {
+    .shell { width: calc(100% - 1.3rem); }
+    .intro { align-items: stretch; flex-direction: column; }
+    .mode { white-space: nowrap; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .chart { grid-template-columns: 1fr; }
+    .peak { border-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="shell masthead">
+    <div class="brand"><span class="mark" aria-hidden="true">RC</span> Roy Communication</div>
+    <span class="mode">Synthetic replay</span>
+  </div>
+</header>
+<main class="shell">
+  <div class="intro">
+    <div><h1>Network replay</h1><p id="description">Explore the ONU observations behind each incident.</p></div>
+    <label class="field">Scenario<select id="scenario"></select></label>
+  </div>
+  <p id="message" role="status">Loading replay…</p>
+  <div id="dashboard" hidden>
+    <nav class="checkpoints" id="checkpoints" aria-label="Replay checkpoint"></nav>
+    <div class="stamp" aria-live="polite" id="stamp"></div>
+    <dl class="metrics" id="metrics"></dl>
+    <div class="boards">
+      <section class="panel">
+        <div class="head"><div><h2>Optical topology</h2><p class="muted">Select an ONU to inspect its observations.</p></div><span class="pill mono" id="port"></span></div>
+        <div id="topology"></div>
+        <div class="legend">
+          <span><i class="positive"></i>Online</span><span><i class="loss"></i>Loss of signal</span>
+          <span><i class="attention"></i>Power loss / cause unknown</span><span><i class="muted"></i>Unknown state</span>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="head"><div><h2>Incident history</h2><p class="muted">Fault domains inferred from the replay evidence.</p></div></div>
+        <div id="incidents"></div>
+      </section>
+    </div>
+    <section class="panel journal">
+      <div class="head">
+        <div><h2>Observation journal</h2><p class="muted" id="journal-count"></p></div>
+        <div class="tools">
+          <input type="search" id="query" aria-label="Filter by ONU ID" placeholder="Filter by ONU ID">
+          <select id="kind" aria-label="Filter by observation">
+            <option value="">All observations</option><option value="ONU_ONLINE">Online</option>
+            <option value="ONU_LOS">Loss of signal</option><option value="ONU_DYING_GASP">Dying Gasp</option>
+            <option value="ONU_OFFLINE_UNKNOWN">Offline · cause unknown</option>
+          </select>
+          <button id="clear-evidence" type="button" hidden>All evidence</button>
+        </div>
+      </div>
+      <div class="scroll">
+        <table><thead><tr><th>Observed (UTC)</th><th>Received (UTC)</th><th>ONU</th><th>Observation</th><th>Alarm ID</th></tr></thead><tbody id="alarms"></tbody></table>
+      </div>
+      <p class="empty" id="no-results" hidden>No observations match the filters.</p>
+    </section>
+  </div>
+</main>
+<footer><div class="shell">EPON replay scenarios · Java simulator, Syrotech adapter and correlation engine</div></footer>
+<script id="bundled-replays" type="application/json"></script>
+<script>
+  const scenarios = [
+    { title: "Shared branch outage", views: [["s2-open", "Incident opens"], ["s2-resolved", "Recovered"]],
+      description: "Follow a cluster of optical losses on splitter S2 through stable recovery." },
+    { title: "Delayed LOS confirmation", views: [["delayed-los-pending", "Before confirmation"], ["delayed-los-confirmed", "LOS confirmed"]],
+      description: "Three ONUs go offline. Later polls establish loss of signal and the engine links it back to the outage." },
+    { title: "Single ONU power loss", views: [["dying-gasp", "Dying Gasp"]],
+      description: "One ONU reports power loss while the rest of the PON stays online." },
+    { title: "Cascaded splitters", views: [["cascade-open", "Incident opens"]],
+      description: "The same set of affected ONUs points to two possible fiber segments." }
+  ];
+
+  const label = {
+    ONLINE: "Online", LOS: "Loss of signal", DYING_GASP: "Dying Gasp", OFFLINE_UNKNOWN: "Offline · cause unknown",
+    UNKNOWN: "Unknown", REACHABLE: "Reachable", DOWN: "Down", ONU_ONLINE: "Online", ONU_LOS: "Loss of signal", ONU_DYING_GASP: "Dying Gasp",
+    ONU_OFFLINE_UNKNOWN: "Offline · cause unknown", OPEN: "Open", RECOVERING: "Recovering", RESOLVED: "Resolved",
+    SUPERSEDED: "Superseded", INFERRED_SHARED_LOS: "Inferred shared LOS", OBSERVED_PORT_DOWN: "Observed PON port down"
+  };
+  const evidenceColors = {
+    ONLINE: "positive", LOS: "loss", DYING_GASP: "attention", OFFLINE_UNKNOWN: "attention", UNKNOWN: "muted",
+    ONU_ONLINE: "positive", ONU_LOS: "loss", ONU_DYING_GASP: "attention", ONU_OFFLINE_UNKNOWN: "attention"
+  };
+  const byId = id => document.getElementById(id);
+  const title = value => label[value] ?? value;
+  const clock = timestamp => timestamp?.split("T")[1]?.replace(/Z$/, "") ?? "—";
+  const last = list => list[list.length - 1];
+  let views = {};
+  let selected;
+  let evidenceFilter;
+
+  function element(tag, className, value) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value !== undefined) node.textContent = value;
+    return node;
+  }
+
+  function status(value) {
+    return element("span", "pill " + (evidenceColors[value] ?? ""), title(value));
+  }
+
+  function render(replay) {
+    selected = replay;
+    evidenceFilter = undefined;
+    byId("query").value = "";
+    byId("kind").value = "";
+    const scenario = scenarios[Number(byId("scenario").value)];
+    byId("description").textContent = scenario.description;
+    byId("checkpoints").replaceChildren(...scenario.views.map(([id, name]) => {
+      const button = element("button", "", name);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(id === replay.viewId));
+      button.addEventListener("click", () => {
+        render(views[id]);
+        byId("checkpoints").querySelector("[aria-pressed=true]").focus();
+      });
+      return button;
+    }));
+    byId("stamp").textContent = "Replay cutoff · " + clock(replay.replayTimestamp) + " UTC";
+    const readings = Object.values(replay.observed.onus);
+    const active = replay.incidents.filter(item => ["OPEN", "RECOVERING"].includes(item.status));
+    const stats = [["Online ONUs", readings.filter(onu => onu.state === "ONLINE").length, "positive"],
+      ["Loss of signal", readings.filter(onu => onu.state === "LOS").length, "loss"],
+      ["Power loss / unknown", readings.filter(onu => !["ONLINE", "LOS"].includes(onu.state)).length, "attention"],
+      ["Active incidents", active.length, ""]];
+    byId("metrics").replaceChildren(...stats.map(([name, count, color]) => {
+      const card = element("div", "metric");
+      card.append(element("dt", "", name), element("dd", color, count));
+      return card;
+    }));
+    const candidates = new Set(active.flatMap(item => last(item.timeline).scope.candidateSegments ?? []));
+    byId("port").textContent = replay.observed.ponPort;
+    byId("topology").replaceChildren(renderTopology(replay, candidates));
+    renderIncidents(replay);
+    renderJournal();
+  }
+
+  function renderTopology(replay, candidates) {
+    const { splitters, onuParents } = replay.topology;
+    function branch(id, inputSegment) {
+      const group = element("div");
+      if (inputSegment) {
+        const candidate = candidates.has(inputSegment);
+        group.append(element("div", candidate ? "fiber mono candidate" : "fiber mono",
+          inputSegment + (candidate ? " · inferred candidate" : "")));
+      }
+      const members = Object.keys(onuParents).filter(onu => onuParents[onu] === id);
+      const node = element("div", "node");
+      node.append(element("strong", "mono", id));
+      if (id === replay.observed.ponPort) {
+        node.append(element("span", "pill " + (replay.observed.state === "REACHABLE" ? "positive" : "attention"),
+          title(replay.observed.state)));
+      } else {
+        const online = members.filter(onu => replay.observed.onus[onu]?.state === "ONLINE").length;
+        node.append(element("span", "pill muted", members.length ? online + "/" + members.length + " online" : "Splitter"));
+      }
+      group.append(node);
+      if (members.length) {
+        const grid = element("div", "onu-grid");
+        for (const onu of members) {
+          const state = replay.observed.onus[onu]?.state ?? "UNKNOWN";
+          const chip = element("button", "onu " + evidenceColors[state], onu.split("-").at(-1));
+          chip.type = "button";
+          chip.title = onu + " · " + title(state);
+          chip.setAttribute("aria-label", chip.title);
+          chip.addEventListener("click", () => {
+            evidenceFilter = undefined;
+            byId("query").value = onu;
+            byId("kind").value = "";
+            renderJournal();
+            byId("query").focus();
+          });
+          grid.append(chip);
+        }
+        group.append(grid);
+      }
+      const downstream = splitters.filter(item => item.parentId === id);
+      if (downstream.length) {
+        const children = element("div", "children");
+        children.append(...downstream.map(item => branch(item.id, item.inputSegment)));
+        group.append(children);
+      }
+      return group;
+    }
+    return branch(replay.observed.ponPort);
+  }
+
+  function renderIncidents(replay) {
+    const area = byId("incidents");
+    area.replaceChildren();
+    if (!replay.incidents.length) {
+      const card = element("div", "quiet");
+      card.append(element("strong", "", "No shared outage inferred"));
+      const pending = Object.values(replay.observed.onus).some(onu => onu.state === "OFFLINE_UNKNOWN");
+      card.append(element("p", "muted", pending ? "Offline observations are present. A shared optical cause is still unconfirmed."
+        : "The observations at this checkpoint support no shared branch incident."));
+      area.append(card);
+      return;
+    }
+    const alarms = new Map(replay.observed.alarms.map(alarm => [alarm.eventId, alarm]));
+    for (const incident of replay.incidents) {
+      const opening = incident.timeline[0];
+      const current = last(incident.timeline);
+      const card = element("article", incident.status === "RESOLVED" ? "incident closed" : "incident");
+      const header = element("div");
+      header.append(element("strong", "", title(current.basis) + " · " + current.scope.id), status(incident.status));
+      const candidates = current.scope.candidateSegments ?? [];
+      const historical = element("p", "info muted", "Historical opening " + clock(opening.at) + " UTC");
+      const confirmed = opening.evidenceIds.map(id => alarms.get(id)?.receiveTimestamp).filter(Boolean)
+        .sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
+      if (confirmed) historical.append(" · Opening evidence received " + clock(confirmed) + " UTC");
+      card.append(header, historical);
+      if (candidates.length) card.append(element("p", "muted", "Candidate segments · " + candidates.join(", ")));
+
+      const chart = element("div", "chart");
+      const rows = element("div", "chart-rows");
+      const peak = Math.max(...incident.timeline.map(change => change.affectedCount));
+      const peakMark = incident.timeline.find(change => change.affectedCount === peak);
+      const milestones = [opening, peakMark, ...incident.timeline.filter(change => change.status === "RECOVERING"), current];
+      for (const change of new Set(milestones)) {
+        const row = element("div", "plot-row");
+        const track = element("span", "track");
+        const fill = element("span", "fill");
+        fill.style.width = (change.eligibleCount ? change.affectedCount / change.eligibleCount * 100 : 0) + "%";
+        track.append(fill);
+        row.title = title(change.status) + " · " + change.affectedCount + " of " + change.eligibleCount;
+        row.append(element("time", "", clock(change.at)), track,
+          element("span", "", change.affectedCount + "/" + change.eligibleCount));
+        rows.append(row);
+      }
+      const peakBox = element("div", "peak");
+      peakBox.append(element("strong", "", peak + "/" + peakMark.eligibleCount), element("p", "muted", "Peak affected"));
+      chart.append(rows, peakBox);
+      card.append(chart);
+
+      const details = element("details");
+      details.append(element("summary", "", "Full timeline · " + incident.timeline.length + " changes"));
+      const timeline = element("ul");
+      for (const change of incident.timeline) timeline.append(element("li", "", clock(change.at) + " · "
+        + title(change.status) + " · " + change.affectedCount + "/" + change.eligibleCount));
+      details.append(timeline);
+      if (opening.evidenceIds.length) {
+        const button = element("button", "", "Show opening evidence");
+        button.type = "button";
+        button.addEventListener("click", () => {
+          evidenceFilter = new Set(opening.evidenceIds);
+          byId("query").value = "";
+          byId("kind").value = "";
+          renderJournal();
+          byId("clear-evidence").focus();
+        });
+        details.append(button);
+      }
+      card.append(details);
+      area.append(card);
+    }
+  }
+
+  function renderJournal() {
+    const query = byId("query").value.trim().toLowerCase();
+    const kind = byId("kind").value;
+    const alarms = selected.observed.alarms;
+    const filtered = alarms.filter(alarm => (!query || alarm.onuId?.toLowerCase().includes(query))
+      && (!kind || alarm.type === kind) && (!evidenceFilter || evidenceFilter.has(alarm.eventId)));
+    byId("journal-count").textContent = filtered.length + " of " + alarms.length + " observations";
+    byId("no-results").hidden = filtered.length !== 0;
+    byId("clear-evidence").hidden = !evidenceFilter;
+    byId("alarms").replaceChildren(...filtered.slice().reverse().map(alarm => {
+      const row = element("tr");
+      const type = element("td");
+      type.append(status(alarm.type));
+      row.append(element("td", "mono", clock(alarm.eventTimestamp)), element("td", "mono", clock(alarm.receiveTimestamp)),
+        element("td", "mono", alarm.onuId ?? "—"), type, element("td", "mono", alarm.eventId));
+      return row;
+    }));
+  }
+
+  async function loadReplays() {
+    const bundled = byId("bundled-replays").textContent.trim();
+    if (bundled) return JSON.parse(bundled);
+    const fetchJson = async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error("Replay API returned " + response.status);
+      return response.json();
+    };
+    const ids = await fetchJson("/api/replays");
+    return Promise.all(ids.map(id => fetchJson("/api/replays/" + encodeURIComponent(id))));
+  }
+
+  async function init() {
+    try {
+      views = Object.fromEntries((await loadReplays()).map(replay => [replay.viewId, replay]));
+      byId("scenario").append(...scenarios.map((scenario, index) => {
+        const option = element("option", "", scenario.title);
+        option.value = index;
+        return option;
+      }));
+      byId("scenario").addEventListener("change", () => {
+        render(views[scenarios[Number(byId("scenario").value)].views[0][0]]);
+      });
+      byId("query").addEventListener("input", renderJournal);
+      byId("kind").addEventListener("change", renderJournal);
+      byId("clear-evidence").addEventListener("click", () => {
+        evidenceFilter = undefined;
+        renderJournal();
+        byId("query").focus();
+      });
+      render(views[scenarios[0].views[0][0]]);
+      byId("message").hidden = true;
+      byId("dashboard").hidden = false;
+    } catch (error) {
+      byId("message").textContent = "Could not load the replay views. " + error.message;
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

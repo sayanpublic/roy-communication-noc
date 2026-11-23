@@ -118,9 +118,34 @@ class ReplayApiTest {
     }
 
     @Test
+    void delayedLosHasSeparateOnsetAndConfirmationTimes() {
+        JsonNode pending = get("/delayed-los-pending", JsonNode.class);
+        assertTrue(pending.required("incidents").isEmpty());
+        assertEquals("OFFLINE_UNKNOWN", pending.at("/observed/onus/ONU-01/state").textValue());
+
+        JsonNode confirmed = get("/delayed-los-confirmed", JsonNode.class);
+        JsonNode opening = onlyIncident(confirmed).at("/timeline/0");
+        assertEquals("2026-01-01T00:00:12Z", opening.required("at").textValue());
+        assertEquals("2026-01-01T00:00:24.250Z", confirmed.required("replayTimestamp").textValue());
+        assertEquals(3, opening.required("affectedCount").intValue());
+        assertEquals(4, opening.required("eligibleCount").intValue());
+        assertEquals("S2", confirmed.at("/topology/onuParents/ONU-01").textValue());
+        assertEquals("S3", confirmed.at("/topology/onuParents/ONU-09").textValue());
+    }
+
+    @Test
+    void servesDashboardAtLoopbackRoot() {
+        var response = http.getForEntity("http://127.0.0.1:" + port + "/", String.class);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(MediaType.TEXT_HTML.isCompatibleWith(response.getHeaders().getContentType()));
+        assertTrue(Objects.requireNonNull(response.getBody()).contains("Network replay"));
+    }
+
+    @Test
     void interleavedGetsReturnIdenticalBodiesForEveryListedView() {
         List<String> ids = Arrays.asList(get("", String[].class));
-        assertEquals(List.of("s2-open", "s2-resolved", "dying-gasp", "cascade-open"), ids);
+        assertEquals(List.of("s2-open", "s2-resolved", "dying-gasp", "cascade-open",
+                "delayed-los-pending", "delayed-los-confirmed"), ids);
         var bodies = new HashMap<String, String>();
         for (String id : ids) bodies.put(id, get("/" + id, String.class));
         for (String id : ids.reversed()) assertEquals(bodies.get(id), get("/" + id, String.class));
