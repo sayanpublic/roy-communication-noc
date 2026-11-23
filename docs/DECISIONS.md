@@ -17,8 +17,8 @@
 **Reason:** A passive fiber segment cannot communicate health; confidence-based incident localization is an inference rather than direct measurement.
 
 ## ADR-005: EPON-specific Syrotech integration must be discovered empirically
-**Status:** Pending firmware confirmation.
-**Reason:** Exact MIBs, alarms and management APIs are vendor/firmware dependent; GPON commands may not apply.
+
+**The installed build is recorded.** The Device Information screen identifies hardware `V1.2.4` and firmware `V2.03.77R`. The EPON management interfaces, numeric cause codes and raw log formats for this build still require verification.
 
 ## ADR-006 — Offline event-time replay
 
@@ -47,3 +47,13 @@ The `api` module packages Spring Boot with the simulator and correlation engine 
 At startup each named view feeds a fresh engine the simulator alarms received by its fixed UTC cutoff. The engine advances to that cutoff to evaluate recovery timers, and the API retains the resulting immutable view. A GET selects a view by name. Its `replayTimestamp` is the cutoff on the receive clock. Incident timeline entries use event time, including the deadline for stable recovery.
 
 The `observed` object contains PON and ONU readings and a journal of normalized alarms. Each incident change includes its basis, scope, affected and eligible ONUs and counts, and evidence IDs referencing that journal. Candidate segments are inferred from optical topology. ONU keys and membership lists are sorted for repeatable JSON. The cascade uses the same LOS alarms as S2 with F4 downstream of F2.
+
+## ADR-009 — Disconnect reasons in synthetic Syrotech snapshots
+
+The `syrotech-adapter` module normalizes one finite replay for one OLT per call. It orders status rows by observation time and tracks each PON/ONU pair independently. Each result pairs the original row with an `Alarm`. The alarm uses the row ID, PON, ONU, observation time and receive time. The source retains the reason text and its reported disconnect time.
+
+An online reading, including recovery, produces `ONU_ONLINE`. An offline reading can use an explicit reason only if its disconnect time falls after the last online reading and at or before the first offline reading of the current outage. For a replay that starts offline, the disconnect time must coincide with the first offline reading. A timestamp already seen before its claimed occurrence stays unusable for that ONU throughout the replay.
+
+The caller also sets the maximum age of the reason at the time of the status reading. Tests use an inclusive 30-second limit. Both the age and the outage interval must match. The synthetic labels `LOS` and `Loss of Signal` map to `ONU_LOS`, and `Dying Gasp` maps to `ONU_DYING_GASP`. All other offline observations produce `ONU_OFFLINE_UNKNOWN`. Field validation must establish which native values and timestamps carry these meanings.
+
+The adapter checks the complete replay for conflicting explicit causes within one uninterrupted offline interval. If eligible reports disagree between LOS and Dying Gasp, their normalized cause is unknown throughout that interval. Each original reason remains available for inspection. A generic link-loss label or a PON-level alarm also leaves an offline ONU's cause unknown. The related manual supplies fixture vocabulary. [Source notes](PROJECT_CONTEXT.md#references-for-the-syrotech-epon-adapter)

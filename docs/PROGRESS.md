@@ -4,9 +4,11 @@
 
 The Java 21 simulator, correlation engine, and local read-only Spring Boot API run on synthetic data. The API exposes four fixed views of observed ONU and PON state and inferred incident history. See [startup and example requests](#2026-11-23--local-read-only-replay-api).
 
+The offline Syrotech EPON adapter accepts synthetic ONU status snapshots and emits the correlation engine's normalized alarms. The installed OLT reports hardware `V1.2.4`, firmware `V2.03.77R` and build date `2025-08-29`. [Hardware and source notes](PROJECT_CONTEXT.md#references-for-the-syrotech-epon-adapter)
+
 ## Next milestone
 
-Review the local API responses before selecting the next milestone. Field integration depends on separate, authorized verification of the actual firmware and alarm semantics.
+When a redacted offline ONU row or existing alarm entry becomes available, compare its reason and timestamps with the adapter's assumptions. Numeric SNMP cause codes and raw log formats for the installed firmware remain open.
 
 ## Acceptance criteria
 - The sixth S2 LOS opens one inferred incident at 6 of 8 eligible ONUs. It updates through 8 of 8 and resolves after stable recovery.
@@ -116,6 +118,16 @@ curl.exe --noproxy "*" --fail http://127.0.0.1:8080/api/replays/cascade-open
 From the repository root, `mvn test` and `mvn -o package` each passed **41 tests** (4 simulator, 31 correlation and 6 HTTP integration) with zero failures, errors, or skips. The HTTP tests cover all four views, evidence references, interleaved GETs, a 404 for an unknown view, and 405 responses to POST, PUT, and DELETE. The root build pins Maven JAR Plugin 3.4.2, the version used by Spring Boot 3.5.16, for offline packaging.
 
 Two independent launches of the packaged JAR each bound to `127.0.0.1:8080`. The index listed the four documented views, and the JSON body for each view matched across both launches. The API serves these checkpoints from memory. The [decision log](DECISIONS.md#adr-008--local-read-only-replay-api) records how replay cutoffs and incident timestamps are selected.
+
+### 2026-11-23 — Offline Syrotech EPON snapshot adapter
+
+Based on `6dfbdfb` on `codex/dev-olt-simulator`. The new `syrotech-adapter` Maven module accepts typed `OnuStatusSnapshot` rows. Pass the rows from one OLT replay to `SyrotechEponAdapter.normalize`. Each result exposes the original snapshot and an `alarm()` ready for the appropriate PON's `CorrelationEngine.accept`.
+
+In the regression replay an ONU disconnects at second 4, recovers at second 7, and is offline again at second 10. Reusing the first reason produces `ONU_OFFLINE_UNKNOWN` even though the reason is only six seconds old. The test covers both LOS and Dying Gasp. An end-to-end replay also checks that three stale LOS reasons open zero incidents and three fresh LOS reasons after recovery open one S2 incident. The [decision log](DECISIONS.md#adr-009--disconnect-reasons-in-synthetic-syrotech-snapshots) records the evidence rules.
+
+The fixtures include the related manual's `ONU Link LOST` and `Dying Gasp` labels. Further tests cover ambiguous text, contradictory causes, missing timestamps, old and future-dated evidence, shuffled input and identical ONU IDs on different PONs. These tests use synthetic rows throughout.
+
+From the repository root, `mvn -o -pl syrotech-adapter -am test` passed **55 tests** with cached dependencies. The full `mvn test` run passed **61 tests** (20 adapter, 31 correlation, 4 simulator and 6 local HTTP) with zero failures, errors, or skips.
 
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.
