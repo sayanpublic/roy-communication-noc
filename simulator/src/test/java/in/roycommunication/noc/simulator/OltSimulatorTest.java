@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -27,7 +28,10 @@ class OltSimulatorTest {
 
         assertEquals(32, events.size());
         assertPhase(events.subList(0, 16), EventType.ONU_ONLINE, ALL_ONUS);
-        assertPhase(events.subList(16, 24), EventType.ONU_LOS, s2);
+        List<Event> losses = events.subList(16, 24);
+        assertPhase(losses, EventType.ONU_LOS, s2);
+        assertEquals(Duration.ofSeconds(35),
+                Duration.between(losses.getFirst().eventTimestamp(), losses.getLast().eventTimestamp()));
         assertPhase(events.subList(24, 32), EventType.ONU_ONLINE, s2);
     }
 
