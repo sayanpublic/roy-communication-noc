@@ -1,14 +1,26 @@
 # Development Progress — Roy Communication NOC
 
+## New chat handoff
+
+Resume in this repository on `codex/dev-olt-simulator`. Fetch `origin`, check `git status --short --branch`, and fast-forward the branch if needed. Preserve unrelated local files, including the developer's untracked `.vscode/` settings. Use Java 21 and run `mvn test` from the repository root. Commit scoped changes and push this development branch after each task.
+
+- Read [the repository instructions](../AGENTS.md), [project and hardware context](PROJECT_CONTEXT.md), [engineering decisions](DECISIONS.md), and the milestone history below. These files and the redacted fixtures carry the project context across chats.
+- The simulator and correlation engine model synthetic outages, recovery and uncertain telemetry. A candidate splitter or fiber segment is an inference. The six synthetic dashboard checkpoints came from `53e6d03`. Commit `70e9abc` records the packaged API comparison with the private preview.
+- The field replay in `d372cb8` passed 83 tests. It uses five aliased ONU status rows and 14 log rows from one PON on Syrotech hardware `V1.2.4`, firmware `V2.03.77R` (2025-08-29). Reuse the [redacted replay](#2026-11-24--redacted-syrotech-portal-field-replay). It covers two power episodes, a recovery with historical `Wire Down`, and an offline ONU with unknown cause. Source times use the OLT's local clock.
+- Dashboard commit `bf102ec` completed the local PON2 milestone. It displays the five sampled states, both episodes and their supporting rows, the 14-row journal, and the engine's zero shared LOS incidents for this capture. The full suite passed 85 tests. The operator can review it locally. The hosted preview uses the six synthetic views. [Start the field dashboard](#2026-11-24--local-pon2-field-dashboard)
+- The next evidence needed from the owner is a redacted text-log excerpt preserving its original line format and the configured OLT time zone or UTC offset. Firmware optical LOS payloads, reason codes and SNMP OIDs are unverified. Keep all development offline until the owner authorizes a separate collection task. Use the committed aliases for examples and keep screenshots, MACs, subscriber details and access information out of Git.
+
 ## Current status
 
-The Java 21 simulator, correlation engine, and local read-only Spring Boot API run on synthetic data. The API exposes six fixed views of observed ONU and PON state and inferred incident history. The Network Replay dashboard at the API root displays the topology, incident timeline and observation journal. See [startup and example requests](#2026-11-23--local-read-only-replay-api).
+The Java 21 simulator, correlation engine, and local read-only Spring Boot API provide six synthetic checkpoints. Their dashboard shows the topology, incident timeline and observation journal. A separate local view shows a historical PON2 capture from the Syrotech portal. See [synthetic API examples](#2026-11-23--local-read-only-replay-api) and [how to open the field view](#2026-11-24--local-pon2-field-dashboard).
 
 The Syrotech adapter handles synthetic snapshots and an offline field replay of redacted ONU Status and System Log rows. The installed OLT reports hardware `V1.2.4`, firmware `V2.03.77R` and build date `2025-08-29`. [Field replay command and results](#2026-11-24--redacted-syrotech-portal-field-replay) · [Hardware and source notes](PROJECT_CONTEXT.md#references-for-the-syrotech-epon-adapter)
 
 ## Next milestone
 
 Compare a redacted text export against the transcribed portal rows and verify the OLT time zone. Firmware-specific optical LOS payloads, numeric reason codes and SNMP OIDs remain open.
+
+The owner can provide a short excerpt from **System Log → Download Log → txt** with the native line structure preserved, plus the configured time zone or UTC offset if available. Once supplied, compare the excerpt to the committed fixtures and test any parser offline. The current screenshots are represented by the committed redacted tables.
 
 ## Acceptance criteria
 - The sixth S2 LOS opens one inferred incident at 6 of 8 eligible ONUs. It updates through 8 of 8 and resolves after stable recovery.
@@ -180,6 +192,23 @@ java -cp "syrotech-adapter/target/classes;correlation/target/classes" in.roycomm
 ```
 
 `mvn test` passed **83 tests** (4 simulator, 37 correlation, 34 adapter and 8 local HTTP), with zero failures, errors or skips. Eleven tests cover the field replay. The captured log yielded seven normalized transitions and zero shared incidents. A separate test gave three freshly online ONUs the captured ONU-initiated deregistration diagnostic and also opened zero incidents. The print command produced identical output with UTC and Asia/Kolkata as the JVM default time zone. Source timestamps remain OLT-local. [Timing and episode rules](DECISIONS.md#adr-011--offline-syrotech-portal-replay)
+
+### 2026-11-24 — Local PON2 field dashboard
+
+From the repository root with Java 21 and Maven, build and start the dashboard. Use Ctrl+C in the server terminal to stop it.
+
+```powershell
+mvn package
+java -jar api/target/api-0.1.0-SNAPSHOT.jar
+```
+
+Open [Syrotech field replay · PON2](http://127.0.0.1:8080/?view=syrotech-pon2), or choose that name from the local dashboard's **Scenario** menu. The [read-only field endpoint](http://127.0.0.1:8080/api/replays/field/syrotech-pon2) supplies the five sampled ONU states, two power-loss episodes, and all 14 journal rows. Each episode shows its Dying Gasp and the following timeout. Filter the System Log to ONU-B to see deregistration, registration, authentication and finish in order. Its state at capture is **Online** with historical **Wire Down**. ONU-D is **Offline · cause unknown**. The engine detected **0 shared LOS incidents in this capture**. Times are OLT local time.
+
+`FieldReplayView.java` projects the existing adapter result and runs its normalized transitions through the correlation engine. `ReplayController.java` serves the result from memory. `api/src/main/resources/static/index.html` renders the field view. The six-checkpoint synthetic export still uses `GET /api/replays`. [API and preview decision](DECISIONS.md#adr-012--local-field-replay-in-the-dashboard)
+
+`mvn test` passed **85 tests** (4 simulator, 37 correlation, 34 adapter and 10 HTTP integration) with zero failures, errors or skips. The two new HTTP tests in `ReplayApiTest.java` cover the field evidence, state and history, native row order and offset-free timestamps. Write-method checks cover the field endpoint. The offline package built with `mvn -o -DskipTests package` after the full suite passed.
+
+The packaged dashboard and field endpoint both responded on loopback. Desktop browser checks covered both paired episodes, the five sampled rows, the 14 log rows in source order, ONU filtering, and switching back to the synthetic recovery checkpoint. Setting the browser time zone to Los Angeles preserved both OLT-local episode times. At a 390-pixel phone width the tables scrolled within the page. A local copy of the bundled preview displayed four synthetic scenarios backed by six checkpoints and made zero API requests even when opened with the field-view query.
 
 ## To update after each Codex task
 Record date, branch/commit, files changed, tested commands and results, decisions, known problems and the next proposed development task. Never place secrets or customer PII in this file.
