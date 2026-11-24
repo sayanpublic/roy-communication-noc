@@ -53,6 +53,14 @@
   .muted { color: var(--muted); }
   .mono { font-family: var(--mono); }
   .panel p { font-size: .86rem; }
+  .capture-boards { grid-template-columns: minmax(0, 3fr) minmax(19rem, 2fr); }
+  .episode { border-left: 3px solid var(--amber); background: var(--raised); border-radius: .25rem; padding: .7rem .8rem; }
+  .episode + .episode { margin-top: .65rem; }
+  .episode ol { margin: .4rem 0 0; padding-left: 1.2rem; }
+  .episode li { padding: .18rem 0; font-size: .86rem; }
+  .episode small { display: block; color: var(--muted); }
+  .capture-time { display: grid; font: .8rem/1.4 var(--mono); }
+  .capture-time span:first-child { color: var(--muted); }
   .pill { font-size: .76rem; border-radius: .3rem; padding: .11rem .38rem; background: #23353c; white-space: nowrap; }
   .positive { color: var(--green); }
   .loss { color: var(--orange); }
@@ -99,7 +107,7 @@
   @media (max-width: 560px) {
     .shell { width: calc(100% - 1.3rem); }
     .intro { align-items: stretch; flex-direction: column; }
-    .mode { white-space: nowrap; }
+    .mode { text-align: center; }
     .metrics { grid-template-columns: repeat(2, 1fr); }
     .chart { grid-template-columns: 1fr; }
     .peak { border-left: 0; }
@@ -110,12 +118,12 @@
 <header>
   <div class="shell masthead">
     <div class="brand"><span class="mark" aria-hidden="true">RC</span> Roy Communication</div>
-    <span class="mode">Synthetic replay</span>
+    <span class="mode" id="mode">Synthetic replay</span>
   </div>
 </header>
 <main class="shell">
   <div class="intro">
-    <div><h1>Network replay</h1><p id="description">Explore the ONU observations behind each incident.</p></div>
+    <div><h1 id="view-title">Network replay</h1><p id="description">Explore the ONU observations behind each incident.</p></div>
     <label class="field">Scenario<select id="scenario"></select></label>
   </div>
   <p id="message" role="status">Loading replay…</p>
@@ -156,6 +164,36 @@
       <p class="empty" id="no-results" hidden>No observations match the filters.</p>
     </section>
   </div>
+  <div id="field-dashboard" hidden>
+    <div class="boards capture-boards">
+      <section class="panel">
+        <div class="head"><div><h2>Sampled ONU status</h2><p class="muted">Registration and deregistration times are OLT local time.</p></div></div>
+        <div class="scroll">
+          <table aria-label="Sampled ONU status">
+            <thead><tr><th>ONU</th><th>State at capture</th><th>Last deregister reason</th><th>Last deregister</th><th>Last register</th></tr></thead>
+            <tbody id="field-onus"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="head"><div><h2>Power-loss episodes</h2><p class="muted">Supporting System Log rows in OLT local time.</p></div><span class="pill attention" id="episode-count"></span></div>
+        <div id="episodes"></div>
+      </section>
+    </div>
+    <section class="panel journal">
+      <div class="head">
+        <div><h2>System Log</h2><p class="muted" id="field-log-count"></p></div>
+        <label class="field">ONU<select id="field-log-filter"><option value="">All sampled ONUs</option></select></label>
+      </div>
+      <div class="scroll">
+        <table aria-label="Redacted System Log">
+          <thead><tr><th>Portal row</th><th>OLT local time</th><th>ONU</th><th>Event</th><th>Diagnostic</th></tr></thead>
+          <tbody id="field-log"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="field-log-empty" hidden>No log rows for this ONU in the capture.</p>
+    </section>
+  </div>
 </main>
 <footer><div class="shell">EPON replay scenarios · Java simulator, Syrotech adapter and correlation engine</div></footer>
 <script id="bundled-replays" type="application/json"></script>
@@ -182,12 +220,17 @@
     ONU_ONLINE: "positive", ONU_LOS: "loss", ONU_DYING_GASP: "attention", ONU_OFFLINE_UNKNOWN: "attention"
   };
   const byId = id => document.getElementById(id);
+  const fieldId = "syrotech-pon2";
+  const fieldTitle = "Syrotech field replay · PON2";
+  const bundled = byId("bundled-replays").textContent.trim();
+  const localField = !bundled && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
   const title = value => label[value] ?? value;
   const clock = timestamp => timestamp?.split("T")[1]?.replace(/Z$/, "") ?? "—";
   const last = list => list[list.length - 1];
   let views = {};
   let selected;
   let evidenceFilter;
+  let fieldRequest;
 
   function element(tag, className, value) {
     const node = document.createElement(tag);
@@ -376,16 +419,111 @@
     }));
   }
 
+  function localTimeCell(value) {
+    const cell = element("td");
+    if (!value) {
+      cell.textContent = "N/A";
+      return cell;
+    }
+    const time = element("time", "capture-time");
+    time.dateTime = value;
+    for (const part of value.split("T")) time.append(element("span", "", part));
+    cell.append(time);
+    return cell;
+  }
+
+  function renderFieldLog(journal) {
+    const onu = byId("field-log-filter").value;
+    const entries = journal.filter(row => !onu || row.onu.id === onu);
+    byId("field-log-count").textContent = entries.length + " of " + journal.length + " rows · oldest first";
+    byId("field-log-empty").hidden = entries.length > 0;
+    byId("field-log").replaceChildren(...entries.map(entry => {
+      const row = element("tr");
+      row.append(element("td", "mono", entry.tableRow), localTimeCell(entry.oltLocalTime),
+        element("td", "mono", entry.onu.id), element("td", "", entry.event), element("td", "", entry.diagnostic || "—"));
+      return row;
+    }));
+  }
+
+  function renderField(capture) {
+    byId("mode").textContent = "Historical capture · " + capture.onus.length + " sampled ONUs";
+    const count = capture.sharedLosIncidentCount;
+    byId("description").textContent = count + " shared LOS incident" + (count === 1 ? "" : "s") + " detected in this capture";
+    byId("field-onus").replaceChildren(...capture.onus.map(({source, state}) => {
+      const row = element("tr");
+      const stateCell = element("td");
+      const badge = status(state);
+      if (state === "DYING_GASP") badge.textContent = source.status + " · power loss";
+      stateCell.append(badge);
+      row.append(element("td", "mono", source.onu.id), stateCell, element("td", "", source.lastDeregisterReason),
+        localTimeCell(source.lastDeregister), localTimeCell(source.lastRegister));
+      return row;
+    }));
+    byId("episode-count").textContent = capture.powerEpisodes.length;
+    byId("episodes").replaceChildren(...capture.powerEpisodes.map(({dyingGasp, followUps}) => {
+      const card = element("article", "episode");
+      const evidence = element("ol");
+      for (const entry of [dyingGasp, ...followUps]) {
+        const item = element("li", "", entry.event + (entry.diagnostic ? " · " + entry.diagnostic : ""));
+        item.append(element("small", "mono", entry.oltLocalTime.replace("T", " ") + " · row " + entry.tableRow));
+        evidence.append(item);
+      }
+      card.append(element("strong", "mono", dyingGasp.onu.id), evidence);
+      return card;
+    }));
+    const filter = byId("field-log-filter");
+    filter.replaceChildren(new Option("All sampled ONUs", ""),
+      ...capture.onus.map(({source}) => new Option(source.onu.id, source.onu.id)));
+    filter.onchange = () => renderFieldLog(capture.journal);
+    renderFieldLog(capture.journal);
+  }
+
+  async function fetchJson(path) {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error("Replay API returned " + response.status);
+    return response.json();
+  }
+
   async function loadReplays() {
-    const bundled = byId("bundled-replays").textContent.trim();
     if (bundled) return JSON.parse(bundled);
-    const fetchJson = async path => {
-      const response = await fetch(path);
-      if (!response.ok) throw new Error("Replay API returned " + response.status);
-      return response.json();
-    };
     const ids = await fetchJson("/api/replays");
     return Promise.all(ids.map(id => fetchJson("/api/replays/" + encodeURIComponent(id))));
+  }
+
+  async function showScenario() {
+    const scenario = byId("scenario").value;
+    const field = localField && scenario === fieldId;
+    const url = new URL(location.href);
+    if (localField && (field || url.searchParams.get("view") === fieldId)) {
+      if (field) url.searchParams.set("view", fieldId);
+      else url.searchParams.delete("view");
+      history.replaceState(null, "", url);
+    }
+    byId("field-dashboard").hidden = true;
+    byId("dashboard").hidden = field;
+    byId("message").hidden = !field;
+    byId("view-title").textContent = field ? fieldTitle : "Network replay";
+    if (!field) {
+      byId("mode").textContent = "Synthetic replay";
+      render(views[scenarios[Number(scenario)].views[0][0]]);
+      return;
+    }
+    byId("mode").textContent = "Historical capture";
+    byId("description").textContent = "";
+    byId("message").textContent = "Loading the PON2 capture…";
+    try {
+      fieldRequest ??= fetchJson("/api/replays/field/" + fieldId).catch(error => {
+        fieldRequest = undefined;
+        throw error;
+      });
+      const capture = await fieldRequest;
+      if (byId("scenario").value !== fieldId) return;
+      renderField(capture);
+      byId("message").hidden = true;
+      byId("field-dashboard").hidden = false;
+    } catch (error) {
+      if (byId("scenario").value === fieldId) byId("message").textContent = "Could not load the PON2 capture. " + error.message;
+    }
   }
 
   async function init() {
@@ -396,9 +534,11 @@
         option.value = index;
         return option;
       }));
-      byId("scenario").addEventListener("change", () => {
-        render(views[scenarios[Number(byId("scenario").value)].views[0][0]]);
-      });
+      if (localField) {
+        byId("scenario").add(new Option(fieldTitle, fieldId));
+        if (new URLSearchParams(location.search).get("view") === fieldId) byId("scenario").value = fieldId;
+      }
+      byId("scenario").addEventListener("change", showScenario);
       byId("query").addEventListener("input", renderJournal);
       byId("kind").addEventListener("change", renderJournal);
       byId("clear-evidence").addEventListener("click", () => {
@@ -406,9 +546,7 @@
         renderJournal();
         byId("query").focus();
       });
-      render(views[scenarios[0].views[0][0]]);
-      byId("message").hidden = true;
-      byId("dashboard").hidden = false;
+      await showScenario();
     } catch (error) {
       byId("message").textContent = "Could not load the replay views. " + error.message;
     }

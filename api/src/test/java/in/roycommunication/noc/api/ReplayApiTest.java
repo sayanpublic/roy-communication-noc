@@ -13,11 +13,13 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -142,6 +144,69 @@ class ReplayApiTest {
     }
 
     @Test
+    void fieldCapturePreservesFiveSampledStatesAndTheirHistoricalPortalReasons() {
+        JsonNode view = get("/field/syrotech-pon2", JsonNode.class);
+        assertEquals("PON2", view.required("ponPort").textValue());
+        assertEquals(0, view.required("sharedLosIncidentCount").longValue());
+        JsonNode sample = view.required("onus");
+        assertEquals(5, sample.size());
+        var onus = new HashMap<String, JsonNode>();
+        sample.forEach(row -> onus.put(row.at("/source/onu/id").textValue(), row));
+        assertEquals(Set.of("ONU-A", "ONU-B", "ONU-C", "ONU-D", "ONU-E"), onus.keySet());
+        for (String id : List.of("ONU-A", "ONU-C")) {
+            assertEquals("DYING_GASP", onus.get(id).required("state").textValue());
+            assertEquals("Offline", onus.get(id).at("/source/status").textValue());
+            assertEquals("Power Off", onus.get(id).at("/source/lastDeregisterReason").textValue());
+        }
+        assertEquals("ONLINE", onus.get("ONU-B").required("state").textValue());
+        assertEquals("Wire Down", onus.get("ONU-B").at("/source/lastDeregisterReason").textValue());
+        assertEquals("2026-11-23T23:47:49", onus.get("ONU-B").at("/source/lastDeregister").textValue());
+        assertEquals("OFFLINE_UNKNOWN", onus.get("ONU-D").required("state").textValue());
+        assertEquals("N/A", onus.get("ONU-D").at("/source/lastDeregisterReason").textValue());
+        assertTrue(onus.get("ONU-D").at("/source/lastDeregister").isNull());
+        assertTrue(onus.get("ONU-D").at("/source/lastRegister").isNull());
+        assertEquals("ONLINE", onus.get("ONU-E").required("state").textValue());
+        assertEquals("Power Off", onus.get("ONU-E").at("/source/lastDeregisterReason").textValue());
+    }
+
+    @Test
+    void fieldEpisodesReferenceTheOriginalOrderedJournalWithOffsetFreeTimes() {
+        JsonNode view = get("/field/syrotech-pon2", JsonNode.class);
+        var order = new ArrayList<Integer>();
+        var journal = new HashMap<Integer, JsonNode>();
+        for (JsonNode entry : view.required("journal")) {
+            int number = entry.required("tableRow").intValue();
+            order.add(number);
+            journal.put(number, entry);
+            assertFalse(entry.has("transition"));
+        }
+        assertEquals(List.of(20, 19, 18, 17, 16, 15, 14, 13, 9, 8, 7, 6, 3, 2), order);
+        assertEquals("MPCP ONU initiates DEREG.", journal.get(9).required("diagnostic").textValue());
+        assertEquals(journal.get(9).required("oltLocalTime"), journal.get(8).required("oltLocalTime"));
+        assertEquals("ONU Register", journal.get(8).required("event").textValue());
+        assertEquals("ONU Finish", journal.get(6).required("event").textValue());
+
+        JsonNode episodes = view.required("powerEpisodes");
+        assertEquals(2, episodes.size());
+        for (int i = 0; i < episodes.size(); i++) {
+            int row = List.of(18, 3).get(i);
+            JsonNode gasp = episodes.required(i).required("dyingGasp");
+            JsonNode followUps = episodes.required(i).required("followUps");
+            assertEquals(1, followUps.size());
+            JsonNode timeout = followUps.required(0);
+            assertEquals(journal.get(row), gasp);
+            assertEquals(journal.get(row - 1), timeout);
+            assertEquals(List.of("ONU-A", "ONU-C").get(i), gasp.at("/onu/id").textValue());
+            assertEquals(gasp.required("onu"), timeout.required("onu"));
+            assertEquals("ONU Dying Gasp", gasp.required("event").textValue());
+            assertEquals("ONU Deregister", timeout.required("event").textValue());
+            assertEquals("MPCP TIMEOUT.", timeout.required("diagnostic").textValue());
+            assertEquals(List.of("2026-11-23T22:41:00", "2026-11-23T23:56:55").get(i), gasp.required("oltLocalTime").textValue());
+            assertEquals(List.of("2026-11-23T22:41:02", "2026-11-23T23:56:57").get(i), timeout.required("oltLocalTime").textValue());
+        }
+    }
+
+    @Test
     void interleavedGetsReturnIdenticalBodiesForEveryListedView() {
         List<String> ids = Arrays.asList(get("", String[].class));
         assertEquals(List.of("s2-open", "s2-resolved", "dying-gasp", "cascade-open",
@@ -156,8 +221,10 @@ class ReplayApiTest {
         assertEquals("127.0.0.1", server.getAddress().getHostAddress());
         assertEquals(HttpStatus.NOT_FOUND, http.getForEntity(url("/absent"), String.class).getStatusCode());
         for (HttpMethod method : List.of(HttpMethod.POST, HttpMethod.PUT, HttpMethod.DELETE)) {
-            var response = http.exchange(url("/s2-open"), method, HttpEntity.EMPTY, String.class);
-            assertEquals(HttpStatus.METHOD_NOT_ALLOWED, response.getStatusCode());
+            for (String view : List.of("/s2-open", "/field/syrotech-pon2")) {
+                var response = http.exchange(url(view), method, HttpEntity.EMPTY, String.class);
+                assertEquals(HttpStatus.METHOD_NOT_ALLOWED, response.getStatusCode());
+            }
         }
     }
 

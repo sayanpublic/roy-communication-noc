@@ -75,3 +75,9 @@ An explicit `ONU Dying Gasp` opens a power-loss episode. A following `MPCP TIMEO
 An online status row remains online with its historical reason. For an offline `Power Off` row, the replay checks that its last deregister time matches a gasp from the current episode and that any last register time precedes it. Other offline rows, including `Wire Down` and `N/A`, carry an unknown cause.
 
 Source times use `LocalDateTime`. The status table has no OLT observation timestamp. Its rows are evaluated as current readings and carry no fabricated timed transitions. To exercise the correlation engine, log transitions use elapsed time from the first retained row on a synthetic clock starting at `Instant.EPOCH`. Delivery uses that same replay instant because the screenshots give no receipt times. The CSV files are transcriptions for this replay. The downloaded firmware log format still needs a redacted export.
+
+## ADR-012 — Local field replay in the dashboard
+
+The loopback API serves the redacted PON2 capture at `GET /api/replays/field/syrotech-pon2`. The dashboard uses the adapter's evaluated states, grouped power episodes and ordered native log rows. It shows historical registration times as offset-free OLT local time. The shared LOS count comes from replaying the normalized log transitions through the correlation engine over the sampled PON membership. No splitter connections have been documented for this sample.
+
+`GET /api/replays` lists the six synthetic checkpoints used by the static preview export. The local scenario selector loads the field endpoint on demand. A dashboard with bundled replay data offers only synthetic scenarios, including when someone opens a field-view link.
