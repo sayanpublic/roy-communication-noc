@@ -1,0 +1,6 @@
+pon,onu,status,lastRegister,lastDeregister,lastDeregisterReason
+PON-A,ONU-D,Offline,N/A,N/A,N/A
+PON-A,ONU-E,Online,2026/11/22 09:46:53,2026/11/22 09:30:30,Power Off
+PON-A,ONU-A,Offline,2026/11/23 22:40:26,2026/11/23 22:41:00,Power Off
+PON-A,ONU-B,Online,2026/11/23 23:47:51,2026/11/23 23:47:49,Wire Down
+PON-A,ONU-C,Offline,2026/11/23 22:05:21,2026/11/23 23:56:55,Power Off

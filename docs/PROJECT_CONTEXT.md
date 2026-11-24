@@ -17,6 +17,12 @@ Roy Communication is a local broadband service business in Katwa, West Bengal, I
 - The related GEPON Web User Manual v2.3 describes ONU status and the last deregistration reason in §4.1.4. Its §6.1 alarm list includes *ONU Link LOST* and *Dying Gasp*. These labels guide synthetic fixtures. The adapter treats link loss alone as an unknown offline cause. [Related manual](https://xcombg.com/upload/vsol/GEPON%20OLT%20WEB%20User%20Manual%20v2.3.pdf) · [Readable copy of v2.3](https://fr.scribd.com/document/661936142/VSOL-JOLink-EPON-OLT-WEB-User-Manual-v2)
 - The live adapter still needs the EPON SNMP MIB for hardware `V1.2.4` and firmware `V2.03.77R`, the ONU deregistration reason-code table, and sample LOS, Dying Gasp and recovery payloads. SNMP OIDs, numeric codes and raw syslog formats for this build remain unverified. [Syrotech support](https://www.syrotech.com/contact)
 
+### Observations from the installed EPON portal
+
+On one PON, two offline ONUs showed `Power Off` with last deregistration times matching their respective `ONU Dying Gasp` log entries. Each gasp preceded an `ONU Deregister` entry with `MPCP TIMEOUT.` by two seconds. A recovered ONU showed `Wire Down` for a deregistration logged as `MPCP ONU initiates DEREG.` Its log then showed `ONU Register`, `ONU AUTH Success`, and `ONU Finish`. The portal also showed an online ONU retaining `Power Off` and an offline ONU with `N/A` for the reason and both historical times.
+
+The repository has transcriptions of the relevant log and status fields under consistent aliases. The dates and times use the OLT's local clock. Its time zone, raw export layout and optical LOS payload still need verification. [Redacted system log](../syrotech-adapter/src/main/resources/syrotech/field/system-log.csv) · [Redacted ONU status](../syrotech-adapter/src/main/resources/syrotech/field/onu-status.csv)
+
 ## Business goal
 Move from reactive one-by-one complaint diagnosis through the OLT portal to useful automatic operations: correlate multiple ONU losses; notify about shared outages; identify the probable upstream shared fault domain; preserve fault and repair history; monitor optical-power trends; and show relevant poles, fiber segments, splitters and customer locations on a private map. Avoid building an ornamental GIS dashboard without reliable telemetry/topology.
 
@@ -74,7 +80,7 @@ OLT-01 PON-03 -> F1 -> S1, branching via F2 -> S2 -> ONUs 01-08, and F3 -> S3 ->
 6. Harden authentication, alerts, retention, deployment and external heartbeat.
 
 ## Open questions
-- Which SNMP versions, ONU MIBs, traps and log exports does installed firmware `V2.03.77R` support? Can each reported last-down reason be tied to the time of a particular disconnect?
+- Which SNMP versions, ONU MIBs and traps does installed firmware `V2.03.77R` support? Do exported alarm timestamps match the portal's last deregister times, and which OLT time zone applies?
 - MikroTik model/RouterOS version and ownership of PPPoE/VLAN routing.
 - Number of ONUs/customers; all PON port assignments; splitter topology/routes and accuracy.
 - Poll intervals and collector load tolerances; operational staff/notification channels; network connectivity and server/UPS availability.

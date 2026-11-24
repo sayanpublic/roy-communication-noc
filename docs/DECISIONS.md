@@ -65,3 +65,13 @@ The adapter checks the complete replay for conflicting explicit causes within on
 ## ADR-010 — Same-origin Network Replay dashboard
 
 Spring Boot serves the dashboard at the API root. The replay responses include the synthetic splitter connections and ONU parent assignments so the topology display uses the same inputs as the correlation engine. The browser renders observations and inferred incidents separately. The replay view uses static HTML, CSS and JavaScript and requires no separate frontend build.
+
+## ADR-011 — Offline Syrotech portal replay
+
+One field replay reads two redacted tables from one capture. The System Log retains the portal row number, OLT-local timestamp, PON and ONU aliases, event label, and diagnostic text. Playback traverses the displayed rows from oldest to newest, including events in the same second. Repeated deliveries of a row contribute once. The ONU Status table retains the current status, last register and deregister times, and native last reason.
+
+An explicit `ONU Dying Gasp` opens a power-loss episode. A following `MPCP TIMEOUT.` deregistration on the same PON and ONU can support that episode. The sample uses an inclusive two-second window, the interval visible in both pairs. The caller can set the window for another replay. A new registration sequence ends this association. `ONU Finish` supplies the online transition. An unexplained timeout or ONU-initiated deregistration supplies an unknown-cause offline transition.
+
+An online status row remains online with its historical reason. For an offline `Power Off` row, the replay checks that its last deregister time matches a gasp from the current episode and that any last register time precedes it. Other offline rows, including `Wire Down` and `N/A`, carry an unknown cause.
+
+Source times use `LocalDateTime`. The status table has no OLT observation timestamp. Its rows are evaluated as current readings and carry no fabricated timed transitions. To exercise the correlation engine, log transitions use elapsed time from the first retained row on a synthetic clock starting at `Instant.EPOCH`. Delivery uses that same replay instant because the screenshots give no receipt times. The CSV files are transcriptions for this replay. The downloaded firmware log format still needs a redacted export.
